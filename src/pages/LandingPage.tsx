@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { useRouteStore } from '../stores/routeStore';
+import { useMapStore } from '../stores/mapStore';
 
 const TRAFFIC_IMAGES = [
   {
@@ -138,25 +139,43 @@ function TrafficSlider() {
 function QuickRouteWidget() {
   const navigate = useNavigate();
   const { setStart } = useRouteStore();
-  const [isLocating, setIsLocating] = useState(false);
+  const { setUserLocation, zoomToLocation } = useMapStore();
+  const [routeLocating, setRouteLocating] = useState(false);
+  const [nearbyLocating, setNearbyLocating] = useState(false);
+
+  const getGPS = (onSuccess: (coords: { lat: number; lng: number }) => void, onFail: () => void) => {
+    if (!navigator.geolocation) { onFail(); return; }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => onSuccess({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+      onFail,
+      { enableHighAccuracy: true, timeout: 8000 }
+    );
+  };
 
   const handleFindRoute = () => {
-    if (!navigator.geolocation) {
-      navigate('/routes');
-      return;
-    }
-    setIsLocating(true);
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setStart({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-        setIsLocating(false);
+    setRouteLocating(true);
+    getGPS(
+      (coords) => {
+        setStart(coords);
+        setUserLocation(coords);
+        setRouteLocating(false);
         navigate('/routes');
       },
-      () => {
-        setIsLocating(false);
-        navigate('/routes');
+      () => { setRouteLocating(false); navigate('/routes'); }
+    );
+  };
+
+  const handleFindNearby = () => {
+    setNearbyLocating(true);
+    getGPS(
+      (coords) => {
+        setUserLocation(coords);
+        setStart(coords);
+        zoomToLocation(coords, 14);
+        setNearbyLocating(false);
+        navigate('/map');
       },
-      { timeout: 6000 }
+      () => { setNearbyLocating(false); navigate('/map'); }
     );
   };
 
@@ -166,28 +185,52 @@ function QuickRouteWidget() {
         <div className="w-8 h-8 rounded-lg bg-kigali-green/10 flex items-center justify-center">
           <Navigation className="w-4 h-4 text-kigali-green" />
         </div>
-        <h3 className="font-semibold text-gray-900 dark:text-white">Find Shortest Route</h3>
+        <h3 className="font-semibold text-gray-900 dark:text-white">Get Started</h3>
       </div>
 
       <div className="space-y-3">
+        {/* Nearby facilities */}
+        <button
+          onClick={handleFindNearby}
+          disabled={nearbyLocating || routeLocating}
+          className="w-full flex items-center space-x-3 p-3 bg-kigali-green/5 hover:bg-kigali-green/10 rounded-xl border border-kigali-green/20 transition-colors text-left disabled:opacity-60"
+        >
+          <div className="w-8 h-8 rounded-full bg-kigali-green/10 flex items-center justify-center flex-shrink-0">
+            {nearbyLocating ? (
+              <div className="w-4 h-4 border-2 border-kigali-green border-t-transparent rounded-full animate-spin" />
+            ) : (
+              <MapPin className="w-4 h-4 text-kigali-green" />
+            )}
+          </div>
+          <div className="flex-1">
+            <p className="text-sm font-medium text-gray-900 dark:text-white">
+              {nearbyLocating ? 'Getting location...' : 'Find Nearby Facilities'}
+            </p>
+            <p className="text-xs text-gray-500">See hospitals, pharmacies & more near you</p>
+          </div>
+          <ChevronRight className="w-4 h-4 text-gray-400" />
+        </button>
+
+        {/* Route planning */}
         <button
           onClick={handleFindRoute}
-          disabled={isLocating}
-          className="w-full flex items-center space-x-3 p-3 bg-kigali-blue/5 hover:bg-kigali-blue/10 rounded-xl border border-kigali-blue/20 transition-colors text-left"
+          disabled={routeLocating || nearbyLocating}
+          className="w-full flex items-center space-x-3 p-3 bg-kigali-blue/5 hover:bg-kigali-blue/10 rounded-xl border border-kigali-blue/20 transition-colors text-left disabled:opacity-60"
         >
           <div className="w-8 h-8 rounded-full bg-kigali-blue/10 flex items-center justify-center flex-shrink-0">
-            {isLocating ? (
+            {routeLocating ? (
               <div className="w-4 h-4 border-2 border-kigali-blue border-t-transparent rounded-full animate-spin" />
             ) : (
               <LocateFixed className="w-4 h-4 text-kigali-blue" />
             )}
           </div>
-          <div>
+          <div className="flex-1">
             <p className="text-sm font-medium text-gray-900 dark:text-white">
-              {isLocating ? 'Getting location...' : 'Use My Current Location'}
+              {routeLocating ? 'Getting location...' : 'Plan a Route'}
             </p>
-            <p className="text-xs text-gray-500">Start from where you are now</p>
+            <p className="text-xs text-gray-500">GPS start point + pick destination</p>
           </div>
+          <ChevronRight className="w-4 h-4 text-gray-400" />
         </button>
 
         <Link
@@ -195,7 +238,7 @@ function QuickRouteWidget() {
           className="flex items-center space-x-3 p-3 bg-gray-50 dark:bg-gray-900 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl border border-gray-200 dark:border-gray-700 transition-colors"
         >
           <div className="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center flex-shrink-0">
-            <MapPin className="w-4 h-4 text-gray-500" />
+            <Route className="w-4 h-4 text-gray-500" />
           </div>
           <div>
             <p className="text-sm font-medium text-gray-900 dark:text-white">Click on the Map</p>
@@ -207,7 +250,7 @@ function QuickRouteWidget() {
 
       <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-700">
         <p className="text-xs text-gray-500 dark:text-gray-400 text-center">
-          Routes are optimized to avoid congestion in real-time
+          Routes avoid congestion using real-time traffic data
         </p>
       </div>
     </div>
@@ -318,15 +361,18 @@ export function LandingPage() {
       </section>
 
       {/* ── TRAFFIC CONGESTION SECTION ────────────── */}
-      <section className="py-20 bg-gray-900 relative overflow-hidden">
-        {/* Background pattern */}
-        <div className="absolute inset-0 opacity-5">
-          <div className="grid grid-cols-12 gap-1 h-full">
-            {Array.from({ length: 60 }).map((_, i) => (
-              <div key={i} className="bg-white rounded" />
-            ))}
-          </div>
-        </div>
+      <section
+        className="py-20 relative overflow-hidden"
+        style={{ background: 'linear-gradient(135deg, #020c1b 0%, #012d15 35%, #020f22 65%, #010a13 100%)' }}
+      >
+        {/* Radial glow accents */}
+        <div className="absolute top-0 left-1/4 w-96 h-96 bg-kigali-green/10 rounded-full blur-[120px] pointer-events-none" />
+        <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-kigali-blue/10 rounded-full blur-[120px] pointer-events-none" />
+        {/* Subtle grid overlay */}
+        <div
+          className="absolute inset-0 opacity-[0.03] pointer-events-none"
+          style={{ backgroundImage: 'repeating-linear-gradient(0deg, #fff 0, #fff 1px, transparent 1px, transparent 40px), repeating-linear-gradient(90deg, #fff 0, #fff 1px, transparent 1px, transparent 40px)' }}
+        />
 
         <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="lg:grid lg:grid-cols-2 lg:gap-16 items-center">
