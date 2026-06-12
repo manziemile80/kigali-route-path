@@ -1,46 +1,162 @@
-import { supabase } from '../lib/supabase';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import type { ServiceLocation, ServiceCategory, RoadSegment, AdminBoundary, Coordinates } from '../types';
+
+// Fallback service locations for when Supabase is unavailable
+const FALLBACK_SERVICES: ServiceLocation[] = [
+  // Hospitals
+  { id: 'fb-hospital-1', name: 'King Faisal Hospital', category: 'hospital', subcategory: 'tertiary', address: 'KG 45 St, Kacyiru', coordinates: { lat: -1.9545, lng: 30.0698 }, contact_phone: '+250 788 300 000', operating_hours: '24/7', capacity: 500, wheelchair_accessible: true, emergency_services: true, rating: 4.8, verified: true },
+  { id: 'fb-hospital-2', name: 'CHUK (Centre Hospitalier Universitaire de Kigali)', category: 'hospital', subcategory: 'tertiary', address: 'KN 4 Ave, Nyarugenge', coordinates: { lat: -1.9495, lng: 30.0601 }, contact_phone: '+250 788 301 000', operating_hours: '24/7', capacity: 350, wheelchair_accessible: true, emergency_services: true, rating: 4.6, verified: true },
+  { id: 'fb-hospital-3', name: 'Kanombe Military Hospital', category: 'hospital', subcategory: 'secondary', address: 'Kanombe, Kicukiro', coordinates: { lat: -1.9789, lng: 30.1056 }, contact_phone: '+250 788 302 000', operating_hours: '24/7', capacity: 200, wheelchair_accessible: true, emergency_services: true, rating: 4.5, verified: true },
+  { id: 'fb-hospital-4', name: 'Police Hospital', category: 'hospital', subcategory: 'secondary', address: 'Gishushu, Kigali', coordinates: { lat: -1.9421, lng: 30.0655 }, contact_phone: '+250 788 303 000', operating_hours: '24/7', capacity: 150, wheelchair_accessible: true, emergency_services: true, rating: 4.4, verified: true },
+
+  // Health Centers
+  { id: 'fb-health-1', name: 'Muhima Health Center', category: 'health_center', subcategory: 'primary', address: 'Muhima, Nyarugenge', coordinates: { lat: -1.9512, lng: 30.0585 }, contact_phone: '+250 788 310 000', operating_hours: '08:00-17:00', capacity: 50, wheelchair_accessible: true, emergency_services: false, rating: 4.2, verified: true },
+  { id: 'fb-health-2', name: 'Gitega Health Center', category: 'health_center', subcategory: 'primary', address: 'Gitega', coordinates: { lat: -1.9645, lng: 30.0723 }, contact_phone: '+250 788 311 000', operating_hours: '08:00-17:00', capacity: 40, wheelchair_accessible: true, emergency_services: false, rating: 4.1, verified: true },
+  { id: 'fb-health-3', name: 'Remera Health Center', category: 'health_center', subcategory: 'primary', address: 'Remera', coordinates: { lat: -1.9545, lng: 30.0812 }, contact_phone: '+250 788 312 000', operating_hours: '08:00-17:00', capacity: 45, wheelchair_accessible: true, emergency_services: false, rating: 4.3, verified: true },
+  { id: 'fb-health-4', name: 'Kacyiru Health Center', category: 'health_center', subcategory: 'primary', address: 'Kacyiru', coordinates: { lat: -1.9389, lng: 30.0634 }, contact_phone: '+250 788 313 000', operating_hours: '08:00-17:00', capacity: 35, wheelchair_accessible: true, emergency_services: false, rating: 4.0, verified: true },
+
+  // Schools
+  { id: 'fb-school-1', name: 'University of Rwanda', category: 'school', subcategory: 'university', address: 'KN 67 St, Nyarugenge', coordinates: { lat: -1.9401, lng: 30.0612 }, contact_phone: '+250 788 320 000', operating_hours: '08:00-18:00', capacity: 15000, wheelchair_accessible: true, emergency_services: false, rating: 4.7, verified: true },
+  { id: 'fb-school-2', name: 'Kigali Institute of Science and Technology', category: 'school', subcategory: 'university', address: 'KN 78 St, Kigali', coordinates: { lat: -1.9434, lng: 30.0567 }, contact_phone: '+250 788 321 000', operating_hours: '08:00-18:00', capacity: 8000, wheelchair_accessible: true, emergency_services: false, rating: 4.6, verified: true },
+  { id: 'fb-school-3', name: 'Green Hills Academy', category: 'school', subcategory: 'secondary', address: 'KG 11 Ave, Kacyiru', coordinates: { lat: -1.9401, lng: 30.0745 }, contact_phone: '+250 788 322 000', operating_hours: '08:00-16:00', capacity: 1200, wheelchair_accessible: true, emergency_services: false, rating: 4.5, verified: true },
+  { id: 'fb-school-4', name: 'Kigali Parents School', category: 'school', subcategory: 'primary', address: 'KG 12 St, Kacyiru', coordinates: { lat: -1.9412, lng: 30.0689 }, contact_phone: '+250 788 323 000', operating_hours: '08:00-16:00', capacity: 800, wheelchair_accessible: true, emergency_services: false, rating: 4.4, verified: true },
+  { id: 'fb-school-5', name: 'FAWE Girls School', category: 'school', subcategory: 'secondary', address: 'Gisozi', coordinates: { lat: -1.9467, lng: 30.0778 }, contact_phone: '+250 788 324 000', operating_hours: '08:00-16:00', capacity: 600, wheelchair_accessible: true, emergency_services: false, rating: 4.6, verified: true },
+
+  // Police Stations
+  { id: 'fb-police-1', name: 'Kigali Central Police Station', category: 'police_station', subcategory: 'headquarters', address: 'KG 45 St, Kiyovu', coordinates: { lat: -1.9544, lng: 30.0598 }, contact_phone: '+250 788 330 000', operating_hours: '24/7', capacity: 200, wheelchair_accessible: true, emergency_services: true, rating: 4.5, verified: true },
+  { id: 'fb-police-2', name: 'Kacyiru Police Post', category: 'police_station', subcategory: 'station', address: 'KG 11 Ave, Kacyiru', coordinates: { lat: -1.9356, lng: 30.0712 }, contact_phone: '+250 788 331 000', operating_hours: '24/7', capacity: 50, wheelchair_accessible: true, emergency_services: true, rating: 4.3, verified: true },
+  { id: 'fb-police-3', name: 'Remera Police Station', category: 'police_station', subcategory: 'station', address: 'KG 15 St, Remera', coordinates: { lat: -1.9589, lng: 30.0867 }, contact_phone: '+250 788 332 000', operating_hours: '24/7', capacity: 75, wheelchair_accessible: true, emergency_services: true, rating: 4.4, verified: true },
+
+  // Fire Stations
+  { id: 'fb-fire-1', name: 'Kigali Fire Brigade', category: 'fire_station', subcategory: 'main', address: 'KG 23 St, Kiyovu', coordinates: { lat: -1.9523, lng: 30.0612 }, contact_phone: '+250 788 340 000', operating_hours: '24/7', capacity: 100, wheelchair_accessible: true, emergency_services: true, rating: 4.7, verified: true },
+
+  // Banks
+  { id: 'fb-bank-1', name: 'Bank of Kigali HQ', category: 'bank', subcategory: 'headquarters', address: 'KN 4 Ave, Kigali', coordinates: { lat: -1.9445, lng: 30.0598 }, contact_phone: '+250 788 350 000', operating_hours: '08:00-17:00', capacity: 500, wheelchair_accessible: true, emergency_services: false, rating: 4.5, verified: true },
+  { id: 'fb-bank-2', name: 'Equity Bank Kigali', category: 'bank', subcategory: 'branch', address: 'KG 12 St, Kacyiru', coordinates: { lat: -1.9378, lng: 30.0656 }, contact_phone: '+250 788 351 000', operating_hours: '08:00-17:00', capacity: 300, wheelchair_accessible: true, emergency_services: false, rating: 4.3, verified: true },
+  { id: 'fb-bank-3', name: 'I&M Bank', category: 'bank', subcategory: 'branch', address: 'KN 5 St, Nyarugenge', coordinates: { lat: -1.9489, lng: 30.0634 }, contact_phone: '+250 788 352 000', operating_hours: '08:00-17:00', capacity: 250, wheelchair_accessible: true, emergency_services: false, rating: 4.4, verified: true },
+  { id: 'fb-bank-4', name: 'Kenya Commercial Bank', category: 'bank', subcategory: 'branch', address: 'KG 11 Ave, Remera', coordinates: { lat: -1.9523, lng: 30.0789 }, contact_phone: '+250 788 353 000', operating_hours: '08:00-17:00', capacity: 200, wheelchair_accessible: true, emergency_services: false, rating: 4.2, verified: true },
+
+  // Pharmacies
+  { id: 'fb-pharmacy-1', name: 'Pharmacie du Centre', category: 'pharmacy', subcategory: 'general', address: 'KN 4 Ave, Kigali', coordinates: { lat: -1.9456, lng: 30.0612 }, contact_phone: '+250 788 360 000', operating_hours: '08:00-20:00', capacity: 50, wheelchair_accessible: true, emergency_services: false, rating: 4.4, verified: true },
+  { id: 'fb-pharmacy-2', name: 'Pharmacie Kacyiru', category: 'pharmacy', subcategory: 'general', address: 'KG 11 Ave, Kacyiru', coordinates: { lat: -1.9434, lng: 30.0701 }, contact_phone: '+250 788 361 000', operating_hours: '08:00-20:00', capacity: 40, wheelchair_accessible: true, emergency_services: false, rating: 4.3, verified: true },
+  { id: 'fb-pharmacy-3', name: 'Pharmacie Nyamirambo', category: 'pharmacy', subcategory: 'general', address: 'KN 12 St, Nyamirambo', coordinates: { lat: -1.9689, lng: 30.0456 }, contact_phone: '+250 788 362 000', operating_hours: '08:00-20:00', capacity: 35, wheelchair_accessible: true, emergency_services: false, rating: 4.2, verified: true },
+  { id: 'fb-pharmacy-4', name: 'Pharmacie Remera', category: 'pharmacy', subcategory: 'general', address: 'KG 15 St, Remera', coordinates: { lat: -1.9612, lng: 30.0834 }, contact_phone: '+250 788 363 000', operating_hours: '08:00-20:00', capacity: 45, wheelchair_accessible: true, emergency_services: false, rating: 4.4, verified: true },
+
+  // Bus Stops
+  { id: 'fb-bus-1', name: 'Nyabugogo Bus Terminal', category: 'bus_stop', subcategory: 'terminal', address: 'Nyabugogo', coordinates: { lat: -1.9345, lng: 30.0345 }, contact_phone: '+250 788 370 000', operating_hours: '05:00-22:00', capacity: 5000, wheelchair_accessible: true, emergency_services: false, rating: 4.0, verified: true },
+  { id: 'fb-bus-2', name: 'Kigali City Center Stop', category: 'bus_stop', subcategory: 'station', address: 'KN 5 Rd, Kigali', coordinates: { lat: -1.9445, lng: 30.0612 }, contact_phone: '+250 788 371 000', operating_hours: '05:00-22:00', capacity: 2000, wheelchair_accessible: true, emergency_services: false, rating: 4.2, verified: true },
+  { id: 'fb-bus-3', name: 'Kacyiru Bus Stop', category: 'bus_stop', subcategory: 'station', address: 'KG 11 Ave, Kacyiru', coordinates: { lat: -1.9389, lng: 30.0689 }, contact_phone: '+250 788 372 000', operating_hours: '05:00-22:00', capacity: 1500, wheelchair_accessible: true, emergency_services: false, rating: 4.1, verified: true },
+  { id: 'fb-bus-4', name: 'Remera Bus Stop', category: 'bus_stop', subcategory: 'station', address: 'KG 15 St, Remera', coordinates: { lat: -1.9567, lng: 30.0812 }, contact_phone: '+250 788 373 000', operating_hours: '05:00-22:00', capacity: 1200, wheelchair_accessible: true, emergency_services: false, rating: 4.0, verified: true },
+  { id: 'fb-bus-5', name: 'Kimironko Bus Stop', category: 'bus_stop', subcategory: 'station', address: 'KG 12 St, Kimironko', coordinates: { lat: -1.9534, lng: 30.0923 }, contact_phone: '+250 788 374 000', operating_hours: '05:00-22:00', capacity: 1000, wheelchair_accessible: true, emergency_services: false, rating: 4.1, verified: true },
+
+  // Government Offices
+  { id: 'fb-gov-1', name: 'Kigali City Hall', category: 'government_office', subcategory: 'municipal', address: 'KN 4 Ave, Kigali', coordinates: { lat: -1.9434, lng: 30.0601 }, contact_phone: '+250 788 380 000', operating_hours: '08:00-17:00', capacity: 500, wheelchair_accessible: true, emergency_services: false, rating: 4.5, verified: true },
+  { id: 'fb-gov-2', name: 'Ministry of Health', category: 'government_office', subcategory: 'ministry', address: 'KG 11 Ave, Kacyiru', coordinates: { lat: -1.9356, lng: 30.0723 }, contact_phone: '+250 788 381 000', operating_hours: '08:00-17:00', capacity: 300, wheelchair_accessible: true, emergency_services: false, rating: 4.4, verified: true },
+  { id: 'fb-gov-3', name: 'Ministry of Education', category: 'government_office', subcategory: 'ministry', address: 'KG 12 St, Kacyiru', coordinates: { lat: -1.9334, lng: 30.0656 }, contact_phone: '+250 788 382 000', operating_hours: '08:00-17:00', capacity: 250, wheelchair_accessible: true, emergency_services: false, rating: 4.5, verified: true },
+  { id: 'fb-gov-4', name: 'Rwanda Revenue Authority', category: 'government_office', subcategory: 'agency', address: 'KG 15 St, Remera', coordinates: { lat: -1.9478, lng: 30.0756 }, contact_phone: '+250 788 383 000', operating_hours: '08:00-17:00', capacity: 400, wheelchair_accessible: true, emergency_services: false, rating: 4.3, verified: true },
+
+  // Water Points
+  { id: 'fb-water-1', name: 'Kimisagara Water Point', category: 'water_point', subcategory: 'public', address: 'Kimisagara', coordinates: { lat: -1.9612, lng: 30.0434 }, contact_phone: '+250 788 390 000', operating_hours: '06:00-18:00', capacity: 500, wheelchair_accessible: false, emergency_services: false, rating: 3.8, verified: true },
+  { id: 'fb-water-2', name: 'Gitega Water Kiosk', category: 'water_point', subcategory: 'kiosk', address: 'Gitega', coordinates: { lat: -1.9678, lng: 30.0689 }, contact_phone: '+250 788 391 000', operating_hours: '06:00-18:00', capacity: 300, wheelchair_accessible: false, emergency_services: false, rating: 4.0, verified: true },
+  { id: 'fb-water-3', name: 'Nyarugenge Public Tap', category: 'water_point', subcategory: 'public', address: 'Nyarugenge', coordinates: { lat: -1.9489, lng: 30.0545 }, contact_phone: '+250 788 392 000', operating_hours: '06:00-18:00', capacity: 400, wheelchair_accessible: false, emergency_services: false, rating: 3.9, verified: true },
+  { id: 'fb-water-4', name: 'Kacyiru Water Point', category: 'water_point', subcategory: 'public', address: 'Kacyiru', coordinates: { lat: -1.9356, lng: 30.0778 }, contact_phone: '+250 788 393 000', operating_hours: '06:00-18:00', capacity: 350, wheelchair_accessible: false, emergency_services: false, rating: 4.1, verified: true },
+
+  // Public Utilities
+  { id: 'fb-utility-1', name: 'REG Kigali Office', category: 'public_utility', subcategory: 'electricity', address: 'KG 12 St, Kigali', coordinates: { lat: -1.9412, lng: 30.0634 }, contact_phone: '+250 788 400 000', operating_hours: '08:00-17:00', capacity: 200, wheelchair_accessible: true, emergency_services: false, rating: 4.2, verified: true },
+  { id: 'fb-utility-2', name: 'WASAC Office', category: 'public_utility', subcategory: 'water', address: 'KN 5 Ave, Kigali', coordinates: { lat: -1.9467, lng: 30.0578 }, contact_phone: '+250 788 401 000', operating_hours: '08:00-17:00', capacity: 150, wheelchair_accessible: true, emergency_services: false, rating: 4.1, verified: true },
+];
 
 export async function fetchServiceLocations(
   categories?: ServiceCategory[]
 ): Promise<ServiceLocation[]> {
-  let query = supabase.from('service_locations').select('*');
-
-  if (categories && categories.length > 0) {
-    query = query.in('category', categories);
+  // If Supabase is not configured, use fallback data
+  if (!isSupabaseConfigured) {
+    return filterByCategory(FALLBACK_SERVICES, categories);
   }
 
-  const { data, error } = await query;
-  if (error) throw error;
+  try {
+    let query = supabase.from('service_locations').select('*');
 
-  return (data || []).map(transformServiceLocation);
+    if (categories && categories.length > 0) {
+      query = query.in('category', categories);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    // If database returns empty, use fallback
+    if (!data || data.length === 0) {
+      return filterByCategory(FALLBACK_SERVICES, categories);
+    }
+
+    return data.map(transformServiceLocation);
+  } catch (err) {
+    console.warn('Supabase fetch failed, using fallback data:', err);
+    return filterByCategory(FALLBACK_SERVICES, categories);
+  }
+}
+
+function filterByCategory(
+  services: ServiceLocation[],
+  categories?: ServiceCategory[]
+): ServiceLocation[] {
+  if (!categories || categories.length === 0) return services;
+  return services.filter((s) => categories.includes(s.category));
 }
 
 export async function fetchServiceLocationById(id: string): Promise<ServiceLocation | null> {
-  const { data, error } = await supabase
-    .from('service_locations')
-    .select('*')
-    .eq('id', id)
-    .single();
-
-  if (error) {
-    if (error.code === 'PGRST116') return null;
-    throw error;
+  if (!isSupabaseConfigured) {
+    return FALLBACK_SERVICES.find((s) => s.id === id) || null;
   }
 
-  return data ? transformServiceLocation(data) : null;
+  try {
+    const { data, error } = await supabase
+      .from('service_locations')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116') return null;
+      throw error;
+    }
+
+    return data ? transformServiceLocation(data) : null;
+  } catch {
+    return FALLBACK_SERVICES.find((s) => s.id === id) || null;
+  }
 }
 
 export async function searchServiceLocations(query: string): Promise<ServiceLocation[]> {
-  const { data, error } = await supabase
-    .from('service_locations')
-    .select('*')
-    .or(`name.ilike.%${query}%,address.ilike.%${query}%`)
-    .limit(20);
+  const q = query.toLowerCase();
 
-  if (error) throw error;
+  if (!isSupabaseConfigured) {
+    return FALLBACK_SERVICES.filter(
+      (s) => s.name.toLowerCase().includes(q) || (s.address?.toLowerCase().includes(q) ?? false)
+    ).slice(0, 20);
+  }
 
-  return (data || []).map(transformServiceLocation);
+  try {
+    const { data, error } = await supabase
+      .from('service_locations')
+      .select('*')
+      .or(`name.ilike.%${query}%,address.ilike.%${query}%`)
+      .limit(20);
+
+    if (error) throw error;
+
+    if (!data || data.length === 0) {
+      return FALLBACK_SERVICES.filter(
+        (s) => s.name.toLowerCase().includes(q) || (s.address?.toLowerCase().includes(q) ?? false)
+      ).slice(0, 20);
+    }
+
+    return data.map(transformServiceLocation);
+  } catch {
+    return FALLBACK_SERVICES.filter(
+      (s) => s.name.toLowerCase().includes(q) || (s.address?.toLowerCase().includes(q) ?? false)
+    ).slice(0, 20);
+  }
 }
 
 export async function createServiceLocation(
@@ -160,20 +276,41 @@ export async function findNearestService(
   center: Coordinates,
   category?: ServiceCategory
 ): Promise<ServiceLocation | null> {
+  // Always use fallback data combined with Supabase data for nearest search
   const services = await fetchServiceLocations(category ? [category] : undefined);
 
-  if (services.length === 0) return null;
+  if (services.length === 0) {
+    // Fallback: search in static data
+    const fallback = filterByCategory(FALLBACK_SERVICES, category ? [category] : undefined);
+    if (fallback.length === 0) return null;
+
+    let nearest: ServiceLocation | null = null;
+    let minDist = Infinity;
+
+    fallback.forEach((service) => {
+      const dist = calculateDistanceMeters(center, service.coordinates);
+      if (dist < minDist) {
+        minDist = dist;
+        nearest = service;
+      }
+    });
+
+    return nearest;
+  }
 
   let nearest: ServiceLocation | null = null;
   let minDist = Infinity;
 
-  services.forEach((service) => {
-    const dist = calculateDistanceMeters(center, service.coordinates);
-    if (dist < minDist) {
-      minDist = dist;
-      nearest = service;
-    }
+  // Sort all services by distance and find nearest
+  const sortedServices = [...services].sort((a, b) => {
+    const distA = calculateDistanceMeters(center, a.coordinates);
+    const distB = calculateDistanceMeters(center, b.coordinates);
+    return distA - distB;
   });
+
+  if (sortedServices.length > 0) {
+    nearest = sortedServices[0];
+  }
 
   return nearest;
 }

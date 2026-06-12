@@ -57,8 +57,44 @@ export function buildGraph(segments: RoadSegment[]): RouteGraph {
 
 export function calculateSegmentWeight(segment: RoadSegment): number {
   const lengthKm = segment.length_m / 1000;
-  const effectiveSpeed = segment.speed_kmh / segment.traffic_factor;
+  const trafficFactor = getTrafficFactor(segment);
+  const effectiveSpeed = segment.speed_kmh / trafficFactor;
   return (lengthKm / effectiveSpeed) * 60;
+}
+
+// Get current traffic factor based on time of day and segment
+function getTrafficFactor(segment: RoadSegment): number {
+  const hour = new Date().getHours();
+  const day = new Date().getDay();
+
+  // Base traffic factor from segment
+  let factor = segment.traffic_factor || 1.0;
+
+  // Rush hour multipliers (7-9 AM and 5-7 PM on weekdays)
+  const isRushHourMorning = hour >= 7 && hour <= 9 && day >= 1 && day <= 5;
+  const isRushHourEvening = hour >= 17 && hour <= 19 && day >= 1 && day <= 5;
+  const isWeekend = day === 0 || day === 6;
+
+  if (isRushHourMorning || isRushHourEvening) {
+    // Primary roads have more congestion during rush hour
+    if (segment.road_type === 'primary') {
+      factor *= 1.8;
+    } else if (segment.road_type === 'secondary') {
+      factor *= 1.4;
+    } else {
+      factor *= 1.2;
+    }
+  } else if (isWeekend) {
+    // Lighter traffic on weekends
+    factor *= 0.85;
+  }
+
+  // Late night (10 PM - 6 AM) has minimal traffic
+  if (hour >= 22 || hour <= 6) {
+    factor *= 0.7;
+  }
+
+  return factor;
 }
 
 export function heuristic(a: Coordinates, b: Coordinates): number {

@@ -105,9 +105,23 @@ export function useVoiceAssistant() {
   const { setStart, setEnd, calculateRoute, clearRoute, currentRoute, start, end } = useRouteStore();
   const { zoom, setZoom, zoomToLocation, selectedCategories, setCategories, userLocation, setUserLocation } = useMapStore();
 
-  // Pre-load services for command matching
+  // Pre-load services for command matching (includes fallback)
   useEffect(() => {
-    fetchServiceLocations().then(setServices).catch(() => {});
+    fetchServiceLocations()
+      .then((data) => {
+        if (data.length > 0) {
+          setServices(data);
+        } else {
+          // Force reload with no categories to ensure we get all services
+          fetchServiceLocations().then((all) => {
+            setServices(all.length > 0 ? all : []);
+          });
+        }
+      })
+      .catch(() => {
+        // Even if Supabase fails, fetchServiceLocations should return fallback data
+        setServices([]);
+      });
   }, []);
 
   const addMessage = useCallback((type: 'user' | 'assistant', text: string) => {
@@ -130,19 +144,27 @@ export function useVoiceAssistant() {
   );
 
   const findNearestService = useCallback(
-    (category: ServiceCategory): ServiceLocation | null => {
-      const filtered = services.filter((s) => s.category === category);
+    async (category: ServiceCategory): Promise<ServiceLocation | null> => {
+      // First check if we have local services loaded
+      let filtered = services.filter((s) => s.category === category);
+
+      // If not loaded, try fetching from API (falls back to static data)
+      if (filtered.length === 0) {
+        const fetched = await fetchServiceLocations([category]);
+        filtered = fetched;
+      }
+
       if (filtered.length === 0) return null;
 
       const ref = start || userLocation;
       if (ref) {
-        let nearest: ServiceLocation | null = null;
-        let minDist = Infinity;
-        filtered.forEach((s) => {
-          const d = Math.hypot(s.coordinates.lat - ref.lat, s.coordinates.lng - ref.lng);
-          if (d < minDist) { minDist = d; nearest = s; }
-        });
-        return nearest;
+        // Sort by distance and return nearest
+        const withDist = filtered.map((s) => ({
+          s,
+          d: Math.hypot(s.coordinates.lat - ref.lat, s.coordinates.lng - ref.lng),
+        }));
+        withDist.sort((a, b) => a.d - b.d);
+        return withDist[0].s;
       }
       return filtered[0];
     },
@@ -196,14 +218,14 @@ export function useVoiceAssistant() {
         }
 
         if (matchedCategory) {
-          const nearest = findNearestService(matchedCategory);
+          const nearest = await findNearestService(matchedCategory);
           if (nearest) {
             setEnd(nearest.coordinates);
             zoomToLocation(nearest.coordinates, 15);
             respond(`Setting destination to ${nearest.name}. ${nearest.address ? 'Located at ' + nearest.address + '.' : ''} Press Calculate Route to get directions.`);
             navigate('/routes');
           } else {
-            respond(`Sorry, I could not find any ${CATEGORY_LABELS[matchedCategory]} nearby.`);
+            respond(`Sorry, I could not find any ${CATEGORY_LABELS[matchedCategory]} in the database. Please try another category.`);
           }
           return;
         }
@@ -335,7 +357,7 @@ export function useVoiceAssistant() {
 
       // ── EMERGENCY ────────────────────────────────────────────
       if (t.includes('emergency') || t.includes('help me') || t.includes('urgent')) {
-        const nearest = findNearestService('hospital');
+        const nearest = await findNearestService('hospital');
         if (nearest) {
           setEnd(nearest.coordinates);
           respond(`Emergency! Nearest hospital is ${nearest.name}. Setting as destination. Say "calculate route" to get directions immediately.`);
