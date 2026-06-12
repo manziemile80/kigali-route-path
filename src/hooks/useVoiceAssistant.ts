@@ -103,7 +103,7 @@ export function useVoiceAssistant() {
 
   const navigate = useNavigate();
   const { setStart, setEnd, calculateRoute, clearRoute, currentRoute, start, end } = useRouteStore();
-  const { zoom, setZoom, zoomToLocation, selectedCategories, setCategories } = useMapStore();
+  const { zoom, setZoom, zoomToLocation, selectedCategories, setCategories, userLocation, setUserLocation } = useMapStore();
 
   // Pre-load services for command matching
   useEffect(() => {
@@ -134,18 +134,19 @@ export function useVoiceAssistant() {
       const filtered = services.filter((s) => s.category === category);
       if (filtered.length === 0) return null;
 
-      if (start) {
+      const ref = start || userLocation;
+      if (ref) {
         let nearest: ServiceLocation | null = null;
         let minDist = Infinity;
         filtered.forEach((s) => {
-          const d = Math.hypot(s.coordinates.lat - start.lat, s.coordinates.lng - start.lng);
+          const d = Math.hypot(s.coordinates.lat - ref.lat, s.coordinates.lng - ref.lng);
           if (d < minDist) { minDist = d; nearest = s; }
         });
         return nearest;
       }
       return filtered[0];
     },
-    [services, start]
+    [services, start, userLocation]
   );
 
   const handleCommand = useCallback(
@@ -171,6 +172,7 @@ export function useVoiceAssistant() {
           (pos) => {
             const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
             setStart(coords);
+            setUserLocation(coords);
             zoomToLocation(coords, 15);
             respond('Your location has been set as the start point.');
           },

@@ -7,8 +7,58 @@ import { calculateAccessibilityMetrics, pointsWithinBuffer, generateHeatmapData 
 import type { ServiceLocation, AdminBoundary, ServiceCategory, Coordinates } from '../types';
 import { KIGALI_CENTER, CATEGORY_LABELS } from '../types';
 import {
-  BarChart3, MapPin, Users, TrendingUp, AlertTriangle, CheckCircle, Download, RefreshCw
+  BarChart3, MapPin, Users, TrendingUp, AlertTriangle, CheckCircle, Download, RefreshCw, Image as ImageIcon
 } from 'lucide-react';
+
+const KIGALI_IMAGES = [
+  'https://images.pexels.com/photos/2846230/pexels-photo-2846230.jpeg?auto=compress&cs=tinysrgb&w=800',
+  'https://images.pexels.com/photos/1426516/pexels-photo-1426516.jpeg?auto=compress&cs=tinysrgb&w=800',
+  'https://images.pexels.com/photos/2132126/pexels-photo-2132126.jpeg?auto=compress&cs=tinysrgb&w=800',
+];
+
+function KigaliHeroImage() {
+  const [currentIdx, setCurrentIdx] = useState(0);
+  const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    const img = new window.Image();
+    img.onload = () => setLoaded(true);
+    img.onerror = () => {
+      if (currentIdx < KIGALI_IMAGES.length - 1) {
+        setCurrentIdx(currentIdx + 1);
+      } else {
+        setError(true);
+      }
+    };
+    img.src = KIGALI_IMAGES[currentIdx];
+  }, [currentIdx]);
+
+  if (error) {
+    return (
+      <div className="w-full h-full bg-gradient-to-br from-kigali-green/20 to-kigali-blue/20 flex items-center justify-center">
+        <div className="text-center p-6">
+          <ImageIcon className="w-12 h-12 text-gray-400 mx-auto mb-3" />
+          <p className="text-sm text-gray-500 dark:text-gray-400">Kigali City GIS Coverage Map</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      {!loaded && (
+        <div className="absolute inset-0 bg-gray-200 dark:bg-gray-700 animate-pulse" />
+      )}
+      <img
+        src={KIGALI_IMAGES[currentIdx]}
+        alt="Kigali City GIS coverage map"
+        className={`w-full h-full object-cover transition-opacity duration-500 ${loaded ? 'opacity-100' : 'opacity-0'}`}
+        loading="lazy"
+      />
+    </>
+  );
+}
 
 export function AccessibilityDashboard() {
   const [services, setServices] = useState<ServiceLocation[]>([]);
@@ -133,16 +183,28 @@ export function AccessibilityDashboard() {
 
   return (
     <div className="min-h-screen pt-20 bg-gray-50 dark:bg-gray-900">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-8">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
+      {/* Hero Section with Kigali Image */}
+      <div className="relative h-64 md:h-80 overflow-hidden">
+        <KigaliHeroImage />
+        <div className="absolute inset-0 bg-gradient-to-t from-gray-900/80 via-gray-900/40 to-transparent" />
+        <div className="absolute bottom-0 left-0 right-0 p-6 md:p-10">
+          <div className="max-w-7xl mx-auto">
+            <div className="inline-flex items-center space-x-2 bg-kigali-green/90 text-white px-3 py-1 rounded-full text-xs font-medium mb-3">
+              <MapPin className="w-3 h-3" />
+              <span>Kigali City, Rwanda</span>
+            </div>
+            <h1 className="text-3xl md:text-4xl font-bold text-white">
               Accessibility Dashboard
             </h1>
-            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              Spatial analysis and service coverage metrics for Kigali City
+            <p className="mt-2 text-gray-300 max-w-2xl">
+              Spatial analysis and service coverage metrics for Kigali City public services
             </p>
           </div>
+        </div>
+      </div>
+
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-8">
           <div className="mt-4 md:mt-0 flex items-center space-x-3">
             <div className="flex items-center bg-white dark:bg-gray-800 rounded-lg shadow-sm p-1">
               {radiusOptions.map((opt) => (

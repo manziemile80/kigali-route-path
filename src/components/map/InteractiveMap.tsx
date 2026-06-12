@@ -6,7 +6,7 @@ import type { Coordinates, ServiceLocation, ServiceCategory } from '../../types'
 import { useMapStore } from '../../stores/mapStore';
 import { useRouteStore } from '../../stores/routeStore';
 import { createCategoryIcon, createStartIcon, createEndIcon, createUserLocationIcon } from '../leaflet';
-import { Search, Layers, Locate, ZoomIn, ZoomOut, Route } from 'lucide-react';
+import { Locate, ZoomIn, ZoomOut } from 'lucide-react';
 
 interface InteractiveMapProps {
   services?: ServiceLocation[];
@@ -17,9 +17,12 @@ interface InteractiveMapProps {
   onLocationSelect?: (coords: Coordinates, type: 'start' | 'end') => void;
 }
 
-function LocationMarker() {
+// ── Live location marker with auto-detect on mount ─────────────────────────────
+function LocationMarker({ autoLocate }: { autoLocate?: boolean }) {
   const [position, setPosition] = useState<Coordinates | null>(null);
-  const { setUserLocation, setIsLocating } = useMapStore();
+  const { setUserLocation, setIsLocating, userLocation } = useMapStore();
+  const map = useMap();
+  const located = useRef(false);
 
   useMapEvents({
     locationfound(e) {
@@ -33,9 +36,33 @@ function LocationMarker() {
     },
   });
 
-  return position ? <Marker position={[position.lat, position.lng]} icon={createUserLocationIcon()} /> : null;
+  // Restore position from store if already set
+  useEffect(() => {
+    if (userLocation && !position) setPosition(userLocation);
+  }, [userLocation]);
+
+  // Auto-locate once on mount
+  useEffect(() => {
+    if (autoLocate && !located.current && !userLocation) {
+      located.current = true;
+      setIsLocating(true);
+      map.locate({ setView: false, maximumAge: 30000 });
+    }
+  }, [autoLocate, map, userLocation]);
+
+  if (!position) return null;
+
+  return (
+    <Marker position={[position.lat, position.lng]} icon={createUserLocationIcon()}>
+      <Popup>
+        <div className="text-sm font-semibold text-kigali-green">Your Location</div>
+        <div className="text-xs text-gray-500">{position.lat.toFixed(5)}, {position.lng.toFixed(5)}</div>
+      </Popup>
+    </Marker>
+  );
 }
 
+// ── Click-to-set-route-points ──────────────────────────────────────────────────
 function MapClickHandler({ onLocationSelect }: { onLocationSelect?: (coords: Coordinates, type: 'start' | 'end') => void }) {
   const { start, end, setStart, setEnd } = useRouteStore();
 
@@ -45,40 +72,77 @@ function MapClickHandler({ onLocationSelect }: { onLocationSelect?: (coords: Coo
       if (!start) {
         setStart(coords);
       } else {
-        // Always replace end when start is already set (including when end also exists)
         setEnd(coords);
-        if (onLocationSelect) {
-          onLocationSelect(coords, 'end');
-        }
+        onLocationSelect?.(coords, 'end');
       }
     },
   });
   return null;
 }
 
+// ── Sync store zoom/center to Leaflet ─────────────────────────────────────────
 function MapController() {
-  const { center, zoom, setCenter, setZoom } = useMapStore();
+  const { center, zoom, setCenter, setZoom, isLocating, setIsLocating } = useMapStore();
   const map = useMap();
 
   useEffect(() => {
     map.setView([center.lat, center.lng], zoom);
   }, [center, zoom, map]);
 
+  // Trigger locate when isLocating flag is set externally
+  useEffect(() => {
+    if (isLocating) {
+      map.locate({ setView: true, maxZoom: 16 });
+    }
+  }, [isLocating, map]);
+
   useMapEvents({
     moveend: () => {
-      const newCenter = map.getCenter();
-      const newZoom = map.getZoom();
-      setCenter({ lat: newCenter.lat, lng: newCenter.lng });
-      setZoom(newZoom);
+      const c = map.getCenter();
+      setCenter({ lat: c.lat, lng: c.lng });
+      setZoom(map.getZoom());
+    },
+    locationfound: () => {
+      setIsLocating(false);
+    },
+    locationerror: () => {
+      setIsLocating(false);
     },
   });
 
   return null;
 }
 
-function RouteLine() {
-  const { currentRoute, start, end } = useRouteStore();
+// ── Multi-route polylines ──────────────────────────────────────────────────────
+function MultiRouteLine() {
+  const { routes, selectedRouteIdx, selectRoute, currentRoute, start, end } = useRouteStore();
 
+  if (routes.length > 0) {
+    // Draw non-selected routes first (behind), selected last (on top)
+    const sorted = routes
+      .map((r, i) => ({ r, i }))
+      .sort((a, b) => (a.i === selectedRouteIdx ? 1 : b.i === selectedRouteIdx ? -1 : 0));
+
+    return (
+      <>
+        {sorted.map(({ r, i }) => {
+          const isSelected = i === selectedRouteIdx;
+          return (
+            <Polyline
+              key={i}
+              positions={r.path.map((p) => [p.lat, p.lng] as [number, number])}
+              color={r.color ?? '#22c55e'}
+              weight={isSelected ? 6 : 4}
+              opacity={isSelected ? 0.95 : 0.45}
+              eventHandlers={{ click: () => selectRoute(i) }}
+            />
+          );
+        })}
+      </>
+    );
+  }
+
+  // Draft dashed line when only endpoints are set
   if (!currentRoute && start && end) {
     return (
       <Polyline
@@ -90,19 +154,21 @@ function RouteLine() {
     );
   }
 
-  if (currentRoute && currentRoute.path.length > 0) {
+  // Single legacy route fallback
+  if (currentRoute?.path?.length) {
     return (
       <>
         <Polyline
-          positions={currentRoute.path.map((p) => [p.lat, p.lng])}
-          color="#22c55e"
-          weight={5}
-          opacity={0.8}
+          positions={currentRoute.path.map((p) => [p.lat, p.lng] as [number, number])}
+          color={currentRoute.color ?? '#22c55e'}
+          weight={6}
+          opacity={0.9}
         />
         <Polyline
-          positions={currentRoute.path.map((p) => [p.lat, p.lng])}
+          positions={currentRoute.path.map((p) => [p.lat, p.lng] as [number, number])}
           color="#16a34a"
-          weight={3}
+          weight={2}
+          opacity={0.4}
         />
       </>
     );
@@ -111,21 +177,18 @@ function RouteLine() {
   return null;
 }
 
+// ── Buffer circle ──────────────────────────────────────────────────────────────
 function BufferCircle({ center, radius }: { center: Coordinates; radius: number }) {
   return (
     <Circle
       center={[center.lat, center.lng]}
       radius={radius}
-      pathOptions={{
-        color: '#3b82f6',
-        fillColor: '#3b82f6',
-        fillOpacity: 0.1,
-        weight: 2,
-      }}
+      pathOptions={{ color: '#3b82f6', fillColor: '#3b82f6', fillOpacity: 0.1, weight: 2 }}
     />
   );
 }
 
+// ── Main component ─────────────────────────────────────────────────────────────
 export function InteractiveMap({
   services = [],
   showControls = true,
@@ -134,12 +197,15 @@ export function InteractiveMap({
   height = 'h-screen',
   onLocationSelect,
 }: InteractiveMapProps) {
-  const { center, zoom, selectedLocation, setSelectedLocation, selectedCategories, toggleCategory, isLocating, setIsLocating } = useMapStore();
-  const { start, end, currentRoute } = useRouteStore();
+  const {
+    center, zoom, selectedLocation, setSelectedLocation,
+    selectedCategories, toggleCategory, isLocating, setIsLocating,
+  } = useMapStore();
+  const { start, end, routes, selectedRouteIdx, setEnd } = useRouteStore();
   const mapRef = useRef<L.Map | null>(null);
   const [layerPanelOpen, setLayerPanelOpen] = useState(false);
-  const [showBuffer, setShowBuffer] = useState(false);
-  const [bufferRadius, setBufferRadius] = useState(1000);
+  const [showBuffer, setShowBuffer]         = useState(false);
+  const [bufferRadius, setBufferRadius]     = useState(1000);
 
   const handleLocate = () => {
     if (mapRef.current) {
@@ -148,30 +214,18 @@ export function InteractiveMap({
     }
   };
 
-  const handleZoomIn = () => {
-    if (mapRef.current) {
-      mapRef.current.zoomIn();
-    }
-  };
-
-  const handleZoomOut = () => {
-    if (mapRef.current) {
-      mapRef.current.zoomOut();
-    }
-  };
-
   const filteredServices = selectedCategories.length > 0
     ? services.filter((s) => selectedCategories.includes(s.category))
     : services;
 
   const categoryFilters: { category: ServiceCategory; label: string; color: string }[] = [
-    { category: 'hospital', label: 'Hospitals', color: '#ef4444' },
-    { category: 'health_center', label: 'Health Centers', color: '#f97316' },
-    { category: 'school', label: 'Schools', color: '#8b5cf6' },
-    { category: 'police_station', label: 'Police', color: '#3b82f6' },
-    { category: 'bank', label: 'Banks', color: '#059669' },
-    { category: 'pharmacy', label: 'Pharmacies', color: '#ec4899' },
-    { category: 'bus_stop', label: 'Bus Stops', color: '#6366f1' },
+    { category: 'hospital',          label: 'Hospitals',     color: '#ef4444' },
+    { category: 'health_center',     label: 'Health Centers',color: '#f97316' },
+    { category: 'school',            label: 'Schools',       color: '#8b5cf6' },
+    { category: 'police_station',    label: 'Police',        color: '#3b82f6' },
+    { category: 'bank',              label: 'Banks',         color: '#059669' },
+    { category: 'pharmacy',          label: 'Pharmacies',    color: '#ec4899' },
+    { category: 'bus_stop',          label: 'Bus Stops',     color: '#6366f1' },
   ];
 
   return (
@@ -189,41 +243,40 @@ export function InteractiveMap({
         />
 
         <MapController />
-        <LocationMarker />
+        <LocationMarker autoLocate />
 
         {showRouteControls && <MapClickHandler onLocationSelect={onLocationSelect} />}
 
+        {/* Service markers */}
         {filteredServices.map((service) => (
           <Marker
             key={service.id}
             position={[service.coordinates.lat, service.coordinates.lng]}
             icon={createCategoryIcon(service.category)}
-            eventHandlers={{
-              click: () => setSelectedLocation(service),
-            }}
+            eventHandlers={{ click: () => setSelectedLocation(service) }}
           >
             <Popup>
               <div className="min-w-[200px]">
                 <h3 className="font-semibold text-gray-900">{service.name}</h3>
-                <p className="text-sm text-gray-500 capitalize">{service.category.replace('_', ' ')}</p>
+                <p className="text-sm text-gray-500 capitalize">
+                  {service.category.replace(/_/g, ' ')}
+                </p>
                 {service.address && (
                   <p className="text-xs text-gray-400 mt-1">{service.address}</p>
                 )}
                 {service.contact_phone && (
-                  <p className="text-xs text-gray-500 mt-1">
+                  <p className="text-xs mt-1">
                     <a href={`tel:${service.contact_phone}`} className="text-kigali-green hover:underline">
                       {service.contact_phone}
                     </a>
                   </p>
                 )}
-                <div className="mt-2 flex items-center space-x-2">
+                <div className="mt-2 flex flex-wrap gap-1.5">
                   {service.emergency_services && (
-                    <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded">
-                      Emergency
-                    </span>
+                    <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full">Emergency</span>
                   )}
                   {service.rating > 0 && (
-                    <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded">
+                    <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full">
                       {service.rating}/5
                     </span>
                   )}
@@ -232,11 +285,9 @@ export function InteractiveMap({
                   <button
                     onClick={() => {
                       setEnd(service.coordinates);
-                      if (onLocationSelect) {
-                        onLocationSelect(service.coordinates, 'end');
-                      }
+                      onLocationSelect?.(service.coordinates, 'end');
                     }}
-                    className="mt-2 w-full text-sm bg-kigali-green text-white px-3 py-1 rounded hover:bg-kigali-green/90"
+                    className="mt-3 w-full text-sm bg-kigali-green text-white px-3 py-1.5 rounded-lg hover:bg-kigali-green/90 font-medium"
                   >
                     Set as Destination
                   </button>
@@ -246,53 +297,38 @@ export function InteractiveMap({
           </Marker>
         ))}
 
+        {/* Start / End markers */}
         {start && (
           <Marker position={[start.lat, start.lng]} icon={createStartIcon()}>
-            <Popup>
-              <div className="font-semibold">Start Point</div>
-            </Popup>
+            <Popup><div className="font-semibold text-kigali-green">Start Point</div></Popup>
           </Marker>
         )}
-
         {end && (
           <Marker position={[end.lat, end.lng]} icon={createEndIcon()}>
-            <Popup>
-              <div className="font-semibold">Destination</div>
-            </Popup>
+            <Popup><div className="font-semibold text-red-500">Destination</div></Popup>
           </Marker>
         )}
 
-        <RouteLine />
+        <MultiRouteLine />
 
         {showBuffer && selectedLocation && (
           <BufferCircle center={selectedLocation.coordinates} radius={bufferRadius} />
         )}
       </MapContainer>
 
+      {/* ── Controls overlay ──────────────────────────────── */}
       {showControls && (
         <>
-          <div className="absolute top-4 left-4 right-4 md:left-16 md:right-auto z-[1000] max-w-sm">
-            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-3">
-              <div className="flex items-center space-x-2">
-                <Search className="w-4 h-4 text-gray-400" />
-                <input
-                  type="text"
-                  placeholder="Search services..."
-                  className="flex-1 bg-transparent border-none outline-none text-sm text-gray-700 dark:text-gray-300"
-                />
-              </div>
-            </div>
-          </div>
-
+          {/* Zoom + Locate */}
           <div className="absolute right-4 top-20 z-[1000] flex flex-col space-y-2">
             <button
-              onClick={handleZoomIn}
+              onClick={() => mapRef.current?.zoomIn()}
               className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-2 hover:bg-gray-50 dark:hover:bg-gray-700"
             >
               <ZoomIn className="w-5 h-5 text-gray-700 dark:text-gray-300" />
             </button>
             <button
-              onClick={handleZoomOut}
+              onClick={() => mapRef.current?.zoomOut()}
               className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-2 hover:bg-gray-50 dark:hover:bg-gray-700"
             >
               <ZoomOut className="w-5 h-5 text-gray-700 dark:text-gray-300" />
@@ -301,133 +337,153 @@ export function InteractiveMap({
               onClick={handleLocate}
               disabled={isLocating}
               className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-2 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
+              title="Go to my location"
             >
               <Locate className={`w-5 h-5 text-gray-700 dark:text-gray-300 ${isLocating ? 'animate-pulse' : ''}`} />
             </button>
-            {showLayerPanel && (
-              <button
-                onClick={() => setLayerPanelOpen(!layerPanelOpen)}
-                className={`bg-white dark:bg-gray-800 rounded-lg shadow-md p-2 hover:bg-gray-50 dark:hover:bg-gray-700 ${
-                  layerPanelOpen ? 'ring-2 ring-kigali-green' : ''
-                }`}
-              >
-                <Layers className="w-5 h-5 text-gray-700 dark:text-gray-300" />
-              </button>
-            )}
           </div>
 
-          {showLayerPanel && layerPanelOpen && (
-            <div className="absolute right-16 top-20 z-[1000] bg-white dark:bg-gray-800 rounded-lg shadow-lg p-4 w-64">
-              <h3 className="font-semibold text-gray-900 dark:text-white mb-3">Filter Services</h3>
-              <div className="space-y-2">
-                {categoryFilters.map(({ category, label, color }) => (
-                  <label
-                    key={category}
-                    className="flex items-center space-x-2 cursor-pointer"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={selectedCategories.includes(category)}
-                      onChange={() => toggleCategory(category)}
-                      className="rounded border-gray-300 text-kigali-green focus:ring-kigali-green"
-                    />
-                    <div
-                      className="w-3 h-3 rounded-full"
-                      style={{ backgroundColor: color }}
-                    />
-                    <span className="text-sm text-gray-700 dark:text-gray-300">{label}</span>
-                  </label>
-                ))}
-              </div>
-              <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
-                <h4 className="font-medium text-gray-900 dark:text-white mb-2">Buffer Analysis</h4>
-                <label className="flex items-center space-x-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={showBuffer}
-                    onChange={() => setShowBuffer(!showBuffer)}
-                    className="rounded border-gray-300 text-kigali-green focus:ring-kigali-green"
-                  />
-                  <span className="text-sm text-gray-700 dark:text-gray-300">Show Buffer</span>
-                </label>
-                {showBuffer && (
-                  <div className="mt-2">
-                    <input
-                      type="range"
-                      min="500"
-                      max="5000"
-                      step="100"
-                      value={bufferRadius}
-                      onChange={(e) => setBufferRadius(Number(e.target.value))}
-                      className="w-full"
-                    />
-                    <div className="text-xs text-gray-500 text-center mt-1">
-                      {(bufferRadius / 1000).toFixed(1)} km radius
-                    </div>
+          {/* Layer / Filter panel */}
+          {showLayerPanel && (
+            <>
+              <button
+                onClick={() => setLayerPanelOpen(!layerPanelOpen)}
+                className={`absolute right-4 top-48 z-[1000] bg-white dark:bg-gray-800 rounded-lg shadow-md p-2 hover:bg-gray-50 dark:hover:bg-gray-700 ${layerPanelOpen ? 'ring-2 ring-kigali-green' : ''}`}
+              >
+                <span className="text-xs font-bold text-gray-700 dark:text-gray-300">F</span>
+              </button>
+
+              {layerPanelOpen && (
+                <div className="absolute right-16 top-48 z-[1000] bg-white dark:bg-gray-800 rounded-lg shadow-lg p-4 w-60">
+                  <h3 className="font-semibold text-gray-900 dark:text-white mb-3 text-sm">Filter Categories</h3>
+                  <div className="space-y-2">
+                    {categoryFilters.map(({ category, label, color }) => (
+                      <label key={category} className="flex items-center space-x-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={selectedCategories.includes(category)}
+                          onChange={() => toggleCategory(category)}
+                          className="rounded border-gray-300 text-kigali-green focus:ring-kigali-green"
+                        />
+                        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: color }} />
+                        <span className="text-sm text-gray-700 dark:text-gray-300">{label}</span>
+                      </label>
+                    ))}
                   </div>
-                )}
-              </div>
-            </div>
+                  <div className="mt-4 pt-3 border-t border-gray-200 dark:border-gray-700">
+                    <h4 className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-2">Buffer Analysis</h4>
+                    <label className="flex items-center space-x-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={showBuffer}
+                        onChange={() => setShowBuffer(!showBuffer)}
+                        className="rounded border-gray-300 text-kigali-green focus:ring-kigali-green"
+                      />
+                      <span className="text-sm text-gray-700 dark:text-gray-300">Show Buffer</span>
+                    </label>
+                    {showBuffer && (
+                      <div className="mt-2">
+                        <input
+                          type="range"
+                          min="500"
+                          max="5000"
+                          step="100"
+                          value={bufferRadius}
+                          onChange={(e) => setBufferRadius(Number(e.target.value))}
+                          className="w-full"
+                        />
+                        <div className="text-xs text-gray-500 text-center mt-1">
+                          {(bufferRadius / 1000).toFixed(1)} km radius
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </>
       )}
 
-      {showRouteControls && (start || end) && (
+      {/* ── Route info bar (multi-route) ──────────────────── */}
+      {showRouteControls && routes.length > 0 && (
+        <div className="absolute bottom-4 left-4 right-4 md:left-1/2 md:right-auto md:-translate-x-1/2 z-[1000]">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-3 max-w-lg mx-auto">
+            <p className="text-xs text-gray-500 mb-2 font-medium">
+              Route options — tap to switch
+            </p>
+            <div className="flex gap-2 flex-wrap">
+              {routes.map((r, i) => (
+                <button
+                  key={i}
+                  onClick={() => useRouteStore.getState().selectRoute(i)}
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-all ${
+                    i === selectedRouteIdx
+                      ? 'shadow-sm scale-105'
+                      : 'opacity-60 hover:opacity-80'
+                  }`}
+                  style={
+                    i === selectedRouteIdx
+                      ? { borderColor: r.color, backgroundColor: r.color + '18', color: r.color }
+                      : { borderColor: '#e5e7eb', color: '#6b7280' }
+                  }
+                >
+                  <span
+                    className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                    style={{ backgroundColor: r.color }}
+                  />
+                  <span>{r.label}</span>
+                  <span className="font-normal opacity-70">
+                    {r.distance_m >= 1000
+                      ? `${(r.distance_m / 1000).toFixed(1)} km`
+                      : `${Math.round(r.distance_m)} m`}
+                  </span>
+                  {r.trafficScore !== undefined && (
+                    <span
+                      className={`ml-0.5 px-1 rounded text-[10px] font-bold ${
+                        r.trafficScore < 20 ? 'bg-green-100 text-green-700'
+                          : r.trafficScore < 50 ? 'bg-yellow-100 text-yellow-700'
+                          : 'bg-red-100 text-red-700'
+                      }`}
+                    >
+                      {r.trafficScore < 20 ? 'Low' : r.trafficScore < 50 ? 'Med' : 'High'}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Single route info fallback ─────────────────────── */}
+      {showRouteControls && routes.length === 0 && (start || end) && (
         <div className="absolute bottom-4 left-4 right-4 md:left-1/2 md:right-auto md:-translate-x-1/2 z-[1000]">
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-4 max-w-md mx-auto">
             <div className="flex items-center space-x-4">
               {start && (
-                <div className="flex items-center">
+                <div className="flex items-center space-x-2">
                   <div className="w-3 h-3 rounded-full bg-kigali-green" />
-                  <div className="ml-2 text-sm">
-                    <div className="text-gray-500">From</div>
-                    <div className="font-medium text-gray-900 dark:text-white truncate">
+                  <div className="text-sm">
+                    <div className="text-gray-500 text-xs">From</div>
+                    <div className="font-medium text-gray-900 dark:text-white">
                       {start.lat.toFixed(4)}, {start.lng.toFixed(4)}
                     </div>
                   </div>
                 </div>
               )}
-              <div className="flex-1 flex justify-center">
-                <Route className="w-5 h-5 text-gray-400" />
-              </div>
               {end && (
-                <div className="flex items-center">
+                <div className="flex items-center space-x-2 ml-4">
                   <div className="w-3 h-3 rounded-full bg-red-500" />
-                  <div className="ml-2 text-sm">
-                    <div className="text-gray-500">To</div>
-                    <div className="font-medium text-gray-900 dark:text-white truncate">
+                  <div className="text-sm">
+                    <div className="text-gray-500 text-xs">To</div>
+                    <div className="font-medium text-gray-900 dark:text-white">
                       {end.lat.toFixed(4)}, {end.lng.toFixed(4)}
                     </div>
                   </div>
                 </div>
               )}
             </div>
-            {currentRoute && (
-              <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700 flex justify-around text-sm">
-                <div>
-                  <div className="text-gray-500">Distance</div>
-                  <div className="font-semibold text-gray-900 dark:text-white">
-                    {currentRoute.distance_m >= 1000
-                      ? `${(currentRoute.distance_m / 1000).toFixed(2)} km`
-                      : `${Math.round(currentRoute.distance_m)} m`}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-gray-500">Time</div>
-                  <div className="font-semibold text-gray-900 dark:text-white">
-                    {currentRoute.time_min >= 60
-                      ? `${Math.floor(currentRoute.time_min / 60)}h ${Math.round(currentRoute.time_min % 60)}m`
-                      : `${Math.round(currentRoute.time_min)} min`}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-gray-500">Algorithm</div>
-                  <div className="font-semibold text-gray-900 dark:text-white capitalize">
-                    {currentRoute.algorithm}
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
         </div>
       )}

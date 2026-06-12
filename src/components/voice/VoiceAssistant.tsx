@@ -1,7 +1,7 @@
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import {
   Mic, MicOff, X, Volume2, Trash2,
-  ChevronDown, Loader2, MessageCircle
+  ChevronDown, Loader2, MessageCircle, Send
 } from 'lucide-react';
 import { useVoiceAssistant, type VoiceStatus, type VoiceMessage } from '../../hooks/useVoiceAssistant';
 
@@ -14,14 +14,18 @@ const STATUS_CONFIG: Record<VoiceStatus, { label: string; color: string; dot: st
 };
 
 const QUICK_COMMANDS = [
-  { label: 'My location', cmd: 'use my location' },
+  { label: 'My location',      cmd: 'use my location' },
   { label: 'Nearest hospital', cmd: 'navigate to hospital' },
   { label: 'Nearest pharmacy', cmd: 'navigate to pharmacy' },
-  { label: 'Calculate route', cmd: 'calculate route' },
-  { label: 'Travel time', cmd: 'what is the travel time' },
-  { label: 'Distance', cmd: 'what is the distance' },
-  { label: 'Emergency', cmd: 'emergency' },
-  { label: 'Clear route', cmd: 'clear route' },
+  { label: 'Nearest police',   cmd: 'navigate to police' },
+  { label: 'Nearest school',   cmd: 'navigate to school' },
+  { label: 'Nearest bank',     cmd: 'navigate to bank' },
+  { label: 'Calculate route',  cmd: 'calculate route' },
+  { label: 'Travel time',      cmd: 'what is the travel time' },
+  { label: 'Distance',         cmd: 'what is the distance' },
+  { label: 'Emergency',        cmd: 'emergency' },
+  { label: 'Clear route',      cmd: 'clear route' },
+  { label: 'Show all',         cmd: 'show all services' },
 ];
 
 function WaveformBars({ active }: { active: boolean }) {
@@ -76,7 +80,16 @@ export function VoiceAssistant() {
   } = useVoiceAssistant();
 
   const msgEndRef = useRef<HTMLDivElement>(null);
+  const [textInput, setTextInput] = useState('');
   const cfg = STATUS_CONFIG[status];
+
+  const handleTextSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cmd = textInput.trim();
+    if (!cmd) return;
+    setTextInput('');
+    handleCommand(cmd);
+  };
 
   useEffect(() => {
     msgEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -214,6 +227,25 @@ export function VoiceAssistant() {
             ))}
           </div>
         </div>
+
+        {/* Text input */}
+        <form onSubmit={handleTextSubmit} className="px-3 pt-2 pb-1 flex gap-2">
+          <input
+            type="text"
+            value={textInput}
+            onChange={(e) => setTextInput(e.target.value)}
+            placeholder="Type a command..."
+            disabled={status === 'processing' || status === 'speaking'}
+            className="flex-1 px-3 py-1.5 text-sm bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-full outline-none focus:ring-2 focus:ring-kigali-green/40 disabled:opacity-50"
+          />
+          <button
+            type="submit"
+            disabled={!textInput.trim() || status === 'processing' || status === 'speaking'}
+            className="w-8 h-8 rounded-full bg-kigali-green flex items-center justify-center disabled:opacity-40 hover:bg-kigali-green/90 flex-shrink-0"
+          >
+            <Send className="w-3.5 h-3.5 text-white" />
+          </button>
+        </form>
 
         {/* Microphone button */}
         <div className="px-4 py-4 border-t border-gray-100 dark:border-gray-800 flex items-center justify-center space-x-4">
