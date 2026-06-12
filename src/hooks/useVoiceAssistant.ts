@@ -462,5 +462,6 @@ export function useVoiceAssistant() {
     startListening,
     stopListening,
     clearMessages,
+    handleCommand,
   };
 }

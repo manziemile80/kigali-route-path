@@ -1,6 +1,6 @@
 import { useRef, useEffect } from 'react';
 import {
-  Mic, MicOff, X, Volume2, VolumeX, Trash2,
+  Mic, MicOff, X, Volume2, Trash2,
   ChevronDown, Loader2, MessageCircle
 } from 'lucide-react';
 import { useVoiceAssistant, type VoiceStatus, type VoiceMessage } from '../../hooks/useVoiceAssistant';
@@ -72,7 +72,7 @@ function MessageBubble({ msg }: { msg: VoiceMessage }) {
 export function VoiceAssistant() {
   const {
     status, messages, isOpen, error,
-    open, close, toggle, startListening, clearMessages,
+    open, close, toggle, clearMessages, handleCommand,
   } = useVoiceAssistant();
 
   const msgEndRef = useRef<HTMLDivElement>(null);
@@ -205,13 +205,7 @@ export function VoiceAssistant() {
             {QUICK_COMMANDS.map(({ label, cmd }) => (
               <button
                 key={label}
-                onClick={() => {
-                  // Simulate command
-                  const handler = (useVoiceAssistant as any)._handleCommand;
-                  // We'll trigger via a custom event instead
-                  const event = new CustomEvent('voice-command', { detail: cmd });
-                  window.dispatchEvent(event);
-                }}
+                onClick={() => handleCommand(cmd)}
                 disabled={status === 'listening' || status === 'speaking' || status === 'processing'}
                 className="px-2.5 py-1 text-xs rounded-full bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-kigali-green/10 hover:text-kigali-green border border-gray-200 dark:border-gray-700 hover:border-kigali-green/30 transition-colors disabled:opacity-40"
               >
