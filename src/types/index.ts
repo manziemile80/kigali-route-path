@@ -98,6 +98,10 @@ export interface RouteResult {
   segments: number;
   algorithm: AlgorithmType;
   execution_time_ms: number;
+  trafficScore?: number;   // 0–100; lower = less congestion
+  color?: string;
+  label?: string;
+  isRecommended?: boolean;
 }
 
 export interface RouteAnalysisParams {

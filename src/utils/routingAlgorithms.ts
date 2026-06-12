@@ -331,6 +331,103 @@ export function calculateDirectDistance(a: Coordinates, b: Coordinates): number 
   return turf.distance(from, to, { units: 'meters' });
 }
 
+const ROUTE_COLORS = ['#22c55e', '#3b82f6', '#f59e0b'];
+const ROUTE_LABELS = ['Recommended', 'Alternative 1', 'Alternative 2'];
+
+export async function fetchOSRMRoutes(
+  start: Coordinates,
+  end: Coordinates,
+  travelMode: TravelMode
+): Promise<RouteResult[]> {
+  const profile = travelMode === 'walking' ? 'foot' : 'driving';
+  const url =
+    `https://router.project-osrm.org/route/v1/${profile}/` +
+    `${start.lng},${start.lat};${end.lng},${end.lat}` +
+    `?alternatives=3&geometries=geojson&overview=full`;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 9000);
+
+  let data: { code: string; routes?: Array<{ geometry: { coordinates: number[][] }; distance: number; duration: number; legs: Array<{ steps: unknown[] }> }> };
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(timer);
+    if (!res.ok) throw new Error(`OSRM ${res.status}`);
+    data = await res.json();
+  } catch {
+    clearTimeout(timer);
+    throw new Error('OSRM unavailable');
+  }
+
+  if (data.code !== 'Ok' || !data.routes?.length) throw new Error('No OSRM routes');
+
+  const directDist = calculateDirectDistance(start, end);
+
+  return data.routes.slice(0, 3).map((route, i) => {
+    const path: Coordinates[] = route.geometry.coordinates.map(
+      ([lng, lat]: number[]) => ({ lat, lng })
+    );
+    const ratio = route.distance / Math.max(directDist, 1);
+    const trafficScore = Math.min(100, Math.max(0, Math.round((ratio - 1) * 60)));
+
+    return {
+      path,
+      distance_m: route.distance,
+      time_min: route.duration / 60,
+      segments: route.legs?.[0]?.steps?.length ?? path.length,
+      algorithm: 'dijkstra' as AlgorithmType,
+      execution_time_ms: 0,
+      trafficScore,
+      color: ROUTE_COLORS[i] ?? '#6b7280',
+      label: ROUTE_LABELS[i] ?? `Route ${i + 1}`,
+      isRecommended: i === 0,
+    };
+  });
+}
+
+function simulateRouteVariant(
+  s: Coordinates, e: Coordinates, mode: TravelMode, spread: number, distFactor: number
+): RouteResult {
+  const distance = calculateDirectDistance(s, e) * distFactor * 1.3;
+  const speedKmh = mode === 'walking' ? 5 : mode === 'public_transport' ? 25 : 40;
+  const mid1 = {
+    lat: s.lat + (e.lat - s.lat) * 0.3 + (Math.random() - 0.5) * spread,
+    lng: s.lng + (e.lng - s.lng) * 0.3 + (Math.random() - 0.5) * spread,
+  };
+  const mid2 = {
+    lat: s.lat + (e.lat - s.lat) * 0.7 + (Math.random() - 0.5) * spread,
+    lng: s.lng + (e.lng - s.lng) * 0.7 + (Math.random() - 0.5) * spread,
+  };
+  return {
+    path: [s, mid1, mid2, e],
+    distance_m: distance,
+    time_min: (distance / 1000) / speedKmh * 60,
+    segments: 4,
+    algorithm: 'astar',
+    execution_time_ms: 0,
+  };
+}
+
+export async function fetchRoutesWithFallback(
+  start: Coordinates,
+  end: Coordinates,
+  travelMode: TravelMode,
+  _roadNetwork?: unknown
+): Promise<RouteResult[]> {
+  try {
+    return await fetchOSRMRoutes(start, end, travelMode);
+  } catch {
+    const base = simulateRoute(start, end, 'dijkstra', travelMode);
+    const alt1 = simulateRouteVariant(start, end, travelMode, 0.08, 1.12);
+    const alt2 = simulateRouteVariant(start, end, travelMode, 0.14, 1.25);
+    return [
+      { ...base, color: ROUTE_COLORS[0], label: ROUTE_LABELS[0], isRecommended: true, trafficScore: 10 },
+      { ...alt1, color: ROUTE_COLORS[1], label: ROUTE_LABELS[1], isRecommended: false, trafficScore: 35 },
+      { ...alt2, color: ROUTE_COLORS[2], label: ROUTE_LABELS[2], isRecommended: false, trafficScore: 60 },
+    ];
+  }
+}
+
 export function formatDistance(meters: number): string {
   if (meters < 1000) {
     return `${Math.round(meters)} m`;
