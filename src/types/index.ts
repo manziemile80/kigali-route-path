@@ -33,7 +33,8 @@ export type ServiceCategory =
   | 'bank'
   | 'pharmacy'
   | 'bus_stop'
-  | 'government_office'
+  | 'district_office'
+  | 'trade_center'
   | 'water_point'
   | 'public_utility';
 
@@ -189,7 +190,8 @@ export const CATEGORY_LABELS: Record<ServiceCategory, string> = {
   bank: 'Bank',
   pharmacy: 'Pharmacy',
   bus_stop: 'Bus Stop',
-  government_office: 'Government Office',
+  district_office: 'District Office',
+  trade_center: 'Trade Center',
   water_point: 'Water Point',
   public_utility: 'Public Utility',
 };
@@ -203,7 +205,8 @@ export const CATEGORY_ICONS: Record<ServiceCategory, string> = {
   bank: 'landmark',
   pharmacy: 'pill',
   bus_stop: 'bus',
-  government_office: 'building-2',
+  district_office: 'building-2',
+  trade_center: 'store',
   water_point: 'droplets',
   public_utility: 'zap',
 };

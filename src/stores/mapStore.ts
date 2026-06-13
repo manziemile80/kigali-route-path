@@ -1,6 +1,11 @@
 import { create } from 'zustand';
 import type { Coordinates, ServiceLocation, RoadSegment, MapLayer, ServiceCategory } from '../types';
 
+interface GeolocationError {
+  code: number;
+  message: string;
+}
+
 interface MapState {
   center: Coordinates;
   zoom: number;
@@ -14,6 +19,9 @@ interface MapState {
   layerOpacity: Record<string, number>;
   userLocation: Coordinates | null;
   isLocating: boolean;
+  isTracking: boolean; // Live GPS tracking
+  locationError: string | null;
+  watchId: number | null;
 
   setCenter: (center: Coordinates) => void;
   setZoom: (zoom: number) => void;
@@ -28,6 +36,9 @@ interface MapState {
   toggleHeatmap: () => void;
   setUserLocation: (coords: Coordinates | null) => void;
   setIsLocating: (locating: boolean) => void;
+  setLocationError: (error: string | null) => void;
+  startTracking: () => void;
+  stopTracking: () => void;
   zoomToLocation: (coords: Coordinates, zoom?: number) => void;
   resetView: () => void;
 }
@@ -54,6 +65,9 @@ export const useMapStore = create<MapState>((set, get) => ({
   layerOpacity: {},
   userLocation: null,
   isLocating: false,
+  isTracking: false,
+  locationError: null,
+  watchId: null,
 
   setCenter: (center) => set({ center }),
   setZoom: (zoom) => set({ zoom }),
@@ -82,8 +96,72 @@ export const useMapStore = create<MapState>((set, get) => ({
   },
   toggleTraffic: () => set((state) => ({ showTraffic: !state.showTraffic })),
   toggleHeatmap: () => set((state) => ({ showHeatmap: !state.showHeatmap })),
-  setUserLocation: (coords) => set({ userLocation: coords }),
+  setUserLocation: (coords) => set({ userLocation: coords, locationError: null }),
   setIsLocating: (locating) => set({ isLocating: locating }),
+  setLocationError: (error) => set({ locationError: error, isLocating: false }),
+
+  // Start continuous GPS tracking
+  startTracking: () => {
+    if (!navigator.geolocation) {
+      set({ locationError: 'Geolocation is not supported by your browser' });
+      return;
+    }
+
+    // Stop any existing watch
+    const { watchId } = get();
+    if (watchId !== null) {
+      navigator.geolocation.clearWatch(watchId);
+    }
+
+    set({ isLocating: true, locationError: null });
+
+    const newWatchId = navigator.geolocation.watchPosition(
+      (position) => {
+        const coords: Coordinates = {
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+        };
+        set({
+          userLocation: coords,
+          isLocating: false,
+          isTracking: true,
+          locationError: null,
+        });
+      },
+      (error: GeolocationPositionError) => {
+        let message = 'Could not get your location';
+        switch (error.code) {
+          case error.PERMISSION_DENIED:
+            message = 'Location permission denied. Please allow location access in your browser settings.';
+            break;
+          case error.POSITION_UNAVAILABLE:
+            message = 'Location information is unavailable. Please try again.';
+            break;
+          case error.TIMEOUT:
+            message = 'Location request timed out. Please check your GPS settings.';
+            break;
+        }
+        set({ locationError: message, isLocating: false, isTracking: false });
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 15000,
+        maximumAge: 10000, // Cache for 10 seconds
+      }
+    );
+
+    set({ watchId: newWatchId });
+  },
+
+  // Stop GPS tracking
+  stopTracking: () => {
+    const { watchId } = get();
+    if (watchId !== null) {
+      navigator.geolocation.clearWatch(watchId);
+    }
+    set({ watchId: null, isTracking: false });
+  },
+
   zoomToLocation: (coords, zoom = 16) => set({ center: coords, zoom }),
   resetView: () => set({ center: KIGALI_CENTER, zoom: 13 }),
 }));

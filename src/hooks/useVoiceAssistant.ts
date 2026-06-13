@@ -37,9 +37,17 @@ const CATEGORY_KEYWORDS: Record<string, ServiceCategory> = {
   'bus stop': 'bus_stop',
   bus: 'bus_stop',
   'bus terminal': 'bus_stop',
-  government: 'government_office',
-  'government office': 'government_office',
-  ministry: 'government_office',
+  'district office': 'district_office',
+  district: 'district_office',
+  'gasabo': 'district_office',
+  'kicukiro': 'district_office',
+  'nyarugenge': 'district_office',
+  'trade center': 'trade_center',
+  'trade centres': 'trade_center',
+  'market': 'trade_center',
+  'convention centre': 'trade_center',
+  'convention center': 'trade_center',
+  'shopping': 'trade_center',
   water: 'water_point',
   'water point': 'water_point',
   utility: 'public_utility',
@@ -55,21 +63,26 @@ const CATEGORY_LABELS: Record<ServiceCategory, string> = {
   bank: 'bank',
   pharmacy: 'pharmacy',
   bus_stop: 'bus stop',
-  government_office: 'government office',
+  district_office: 'district office',
+  trade_center: 'trade center',
   water_point: 'water point',
   public_utility: 'public utility',
 };
 
 const HELP_TEXT = `Available commands:
 "navigate to hospital" — find nearest service by type.
+"navigate to trade center" — find nearest trade center.
+"navigate to district office" — find a district office.
 "use my location" — set GPS as start point.
 "calculate route" — compute the current route.
+"show least congested route" — find route with lowest traffic.
 "clear route" — clear route.
 "show hospitals" — filter map to a service type.
 "zoom in" or "zoom out" — adjust map zoom.
 "go to map" or "go to routes" — switch pages.
 "what is the distance" — hear route distance.
 "what is the travel time" — hear estimated time.
+"what is the traffic level" — hear traffic congestion.
 "help" — list all commands.`;
 
 function speak(text: string, onEnd?: () => void) {
@@ -231,9 +244,36 @@ export function useVoiceAssistant() {
         }
 
         // Fuzzy match by service name
-        const nameMatch = services.find((s) =>
+        let nameMatch = services.find((s) =>
           s.name.toLowerCase().includes(query) || query.includes(s.name.toLowerCase().split(' ')[0])
         );
+
+        // Also check for known landmarks
+        if (!nameMatch) {
+          const knownLandmarks: Record<string, { name: string; coords: Coordinates }> = {
+            'kigali convention centre': { name: 'Kigali Convention Centre', coords: { lat: -1.9456, lng: 30.0867 } },
+            'convention centre': { name: 'Kigali Convention Centre', coords: { lat: -1.9456, lng: 30.0867 } },
+            'kigali city market': { name: 'Kigali City Market', coords: { lat: -1.9489, lng: 30.0578 } },
+            'city market': { name: 'Kigali City Market', coords: { lat: -1.9489, lng: 30.0578 } },
+            'nyabugogo': { name: 'Nyabugogo Bus Terminal', coords: { lat: -1.9345, lng: 30.0345 } },
+            'kacyiru': { name: 'Kacyiru', coords: { lat: -1.9389, lng: 30.0689 } },
+            'remora': { name: 'Remera', coords: { lat: -1.9567, lng: 30.0812 } },
+            'kimironko': { name: 'Kimironko', coords: { lat: -1.9534, lng: 30.0923 } },
+            'nyarugenge': { name: 'Nyarugenge District Office', coords: { lat: -1.9434, lng: 30.0601 } },
+            'gasabo': { name: 'Gasabo District Office', coords: { lat: -1.9356, lng: 30.1023 } },
+            'kicukiro': { name: 'Kicukiro District Office', coords: { lat: -1.9756, lng: 30.1045 } },
+          };
+          for (const [key, val] of Object.entries(knownLandmarks)) {
+            if (query.includes(key)) {
+              setEnd(val.coords);
+              zoomToLocation(val.coords, 15);
+              respond(`Setting destination to ${val.name}.`);
+              navigate('/routes');
+              return;
+            }
+          }
+        }
+
         if (nameMatch) {
           setEnd(nameMatch.coordinates);
           zoomToLocation(nameMatch.coordinates, 15);
@@ -242,7 +282,7 @@ export function useVoiceAssistant() {
           return;
         }
 
-        respond(`I could not find "${query}". Try saying "navigate to hospital" or "navigate to pharmacy".`);
+        respond(`I could not find "${query}". Try saying "navigate to hospital", "navigate to Kigali Convention Centre", or "navigate to trade center".`);
         return;
       }
 
@@ -262,6 +302,24 @@ export function useVoiceAssistant() {
         return;
       }
 
+      // ── LEAST CONGESTED ROUTE ─────────────────────────────────
+      if (t.includes('least congested') || t.includes('least traffic') || t.includes('avoid traffic') || t.includes('fastest route')) {
+        if (!start) {
+          respond('Please set a start point first. Say "use my location".');
+          return;
+        }
+        if (!end) {
+          respond('Please set a destination first.');
+          return;
+        }
+        respond('Finding the route with lowest traffic congestion.');
+        navigate('/routes');
+        setTimeout(async () => {
+          await calculateRoute();
+        }, 500);
+        return;
+      }
+
       // ── ROUTE INFO ───────────────────────────────────────────
       if (t.includes('distance') || t.includes('how far')) {
         if (currentRoute) {
@@ -275,6 +333,17 @@ export function useVoiceAssistant() {
       if (t.includes('travel time') || t.includes('how long') || t.includes('duration') || t.includes('estimated time')) {
         if (currentRoute) {
           respond(`The estimated travel time is ${formatTime(currentRoute.time_min)}.`);
+        } else {
+          respond('No route calculated yet. Say "calculate route" first.');
+        }
+        return;
+      }
+
+      if (t.includes('traffic level') || t.includes('traffic condition') || t.includes('congestion')) {
+        if (currentRoute) {
+          const score = currentRoute.trafficScore || 50;
+          const level = score < 30 ? 'low' : score < 60 ? 'moderate' : 'high';
+          respond(`The current traffic level is ${level}. Traffic score: ${score} out of 100.`);
         } else {
           respond('No route calculated yet. Say "calculate route" first.');
         }

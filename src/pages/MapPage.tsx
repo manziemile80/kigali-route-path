@@ -7,7 +7,7 @@ import { useRouteStore } from '../stores/routeStore';
 import { Button } from '../components/ui/Button';
 import {
   Search, MapPin, Navigation, X, Loader2,
-  LocateFixed, ArrowUpDown, Route,
+  LocateFixed, ArrowUpDown, Route, Satellite,
 } from 'lucide-react';
 
 const CATEGORY_FILTERS: { id: ServiceCategory; label: string; color: string }[] = [
@@ -19,7 +19,8 @@ const CATEGORY_FILTERS: { id: ServiceCategory; label: string; color: string }[] 
   { id: 'bank',              label: 'Banks',        color: '#059669' },
   { id: 'pharmacy',          label: 'Pharmacies',   color: '#ec4899' },
   { id: 'bus_stop',          label: 'Bus Stops',    color: '#6366f1' },
-  { id: 'government_office', label: 'Government',   color: '#64748b' },
+  { id: 'district_office',   label: 'Districts',    color: '#64748b' },
+  { id: 'trade_center',      label: 'Trade Centers',color: '#ea580c' },
   { id: 'water_point',       label: 'Water',        color: '#0ea5e9' },
   { id: 'public_utility',    label: 'Utilities',    color: '#14b8a6' },
 ];

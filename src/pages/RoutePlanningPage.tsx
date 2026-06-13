@@ -128,6 +128,68 @@ export function RoutePlanningPage() {
     URL.revokeObjectURL(url);
   };
 
+  const handleDownloadTrip = () => {
+    if (!currentRoute || !start || !end) return;
+
+    const tripData = {
+      tripInfo: {
+        date: new Date().toISOString(),
+        name: `Trip from ${start.lat.toFixed(4)},${start.lng.toFixed(4)} to ${end.lat.toFixed(4)},${end.lng.toFixed(4)}`,
+        travelMode,
+      },
+      start: {
+        coordinates: start,
+        name: 'Start Point',
+      },
+      end: {
+        coordinates: end,
+        name: 'Destination',
+      },
+      route: {
+        distance: {
+          meters: currentRoute.distance_m,
+          kilometers: (currentRoute.distance_m / 1000).toFixed(2),
+          formatted: formatDistance(currentRoute.distance_m),
+        },
+        estimatedTime: {
+          minutes: currentRoute.time_min,
+          formatted: formatTime(currentRoute.time_min),
+        },
+        trafficScore: currentRoute.trafficScore,
+        trafficLevel: currentRoute.trafficScore && currentRoute.trafficScore < 30
+          ? 'Low'
+          : currentRoute.trafficScore && currentRoute.trafficScore < 60
+            ? 'Medium'
+            : 'High',
+        algorithm: currentRoute.algorithm,
+        isRecommended: currentRoute.isRecommended || false,
+      },
+      path: currentRoute.path.map((p, i) => ({
+        index: i,
+        lat: p.lat,
+        lng: p.lng,
+      })),
+      trafficConditions: {
+        currentLevel: traffic.level,
+        currentLabel: traffic.label,
+        avoidTrafficEnabled: avoidTraffic,
+      },
+      metadata: {
+        exportedAt: new Date().toLocaleString(),
+        exportedBy: 'Smart Route Kigali GIS',
+        version: '1.0.0',
+      },
+    };
+
+    const blob = new Blob([JSON.stringify(tripData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `trip-${new Date().toISOString().split('T')[0]}-${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const TravelModeIcon = travelMode === 'walking' ? Footprints : travelMode === 'public_transport' ? Bus : Car;
 
   return (
@@ -393,18 +455,23 @@ export function RoutePlanningPage() {
               ))}
 
               <CardFooter className="pt-0 px-0">
-                <div className="flex space-x-2 w-full">
-                  {isAuthenticated && currentRoute && (
-                    <Button variant="outline" size="sm" onClick={handleSaveRoute} disabled={saved} className="flex-1">
-                      {saved ? <CheckCircle className="w-4 h-4 mr-1 text-green-500" /> : <Save className="w-4 h-4 mr-1" />}
-                      {saved ? 'Saved' : 'Save Route'}
-                    </Button>
-                  )}
-                  {comparisonResults && (
-                    <Button variant="outline" size="sm" onClick={handleExportResults} className="flex-1">
-                      <Download className="w-4 h-4 mr-1" />
-                      Export
-                    </Button>
+                <div className="flex flex-col space-y-2 w-full">
+                  <div className="flex space-x-2 w-full">
+                    {currentRoute && (
+                      <Button variant="outline" size="sm" onClick={handleDownloadTrip} className="flex-1">
+                        <Download className="w-4 h-4 mr-1" />
+                        Download Trip
+                      </Button>
+                    )}
+                    {isAuthenticated && currentRoute && (
+                      <Button variant="outline" size="sm" onClick={handleSaveRoute} disabled={saved} className="flex-1">
+                        {saved ? <CheckCircle className="w-4 h-4 mr-1 text-green-500" /> : <Save className="w-4 h-4 mr-1" />}
+                        {saved ? 'Saved' : 'Save Route'}
+                      </Button>
+                    )}
+                  </div>
+                  {!isAuthenticated && currentRoute && (
+                    <p className="text-xs text-center text-gray-400">Sign in to save routes to your account</p>
                   )}
                 </div>
               </CardFooter>

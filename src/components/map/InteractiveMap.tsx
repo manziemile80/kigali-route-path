@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, Polyline, Circle, useMapEvents, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Polyline, Circle, useMapEvents, useMap, Tooltip } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import type { Coordinates, ServiceLocation, ServiceCategory } from '../../types';
@@ -17,48 +17,114 @@ interface InteractiveMapProps {
   onLocationSelect?: (coords: Coordinates, type: 'start' | 'end') => void;
 }
 
-// ── Live location marker with auto-detect on mount ─────────────────────────────
-function LocationMarker({ autoLocate }: { autoLocate?: boolean }) {
+// ── Live location marker with real-time tracking ───────────────────────────────
+function LocationMarker({ autoLocate, enableTracking }: { autoLocate?: boolean; enableTracking?: boolean }) {
   const [position, setPosition] = useState<Coordinates | null>(null);
-  const { setUserLocation, setIsLocating, userLocation } = useMapStore();
+  const [accuracy, setAccuracy] = useState<number | null>(null);
+  const [heading, setHeading] = useState<number | null>(null);
+  const {
+    setUserLocation, setIsLocating, userLocation, isTracking,
+    setLocationError, locationError
+  } = useMapStore();
   const map = useMap();
   const located = useRef(false);
+  const watchIdRef = useRef<number | null>(null);
 
   useMapEvents({
     locationfound(e) {
       const coords = { lat: e.latlng.lat, lng: e.latlng.lng };
       setPosition(coords);
+      setAccuracy(e.accuracy || null);
+      setHeading(e.heading || null);
       setUserLocation(coords);
       setIsLocating(false);
+      setLocationError(null);
     },
-    locationerror() {
+    locationerror(e) {
       setIsLocating(false);
+      let message = 'Could not get your location';
+      if (e.code === 1) {
+        message = 'Location permission denied. Please allow location access in your browser settings.';
+      } else if (e.code === 2) {
+        message = 'Location unavailable. Please check your device GPS settings.';
+      } else if (e.code === 3) {
+        message = 'Location request timed out. Please try again.';
+      }
+      setLocationError(message);
     },
   });
 
   // Restore position from store if already set
   useEffect(() => {
-    if (userLocation && !position) setPosition(userLocation);
+    if (userLocation && !position) {
+      setPosition(userLocation);
+    }
   }, [userLocation]);
 
   // Auto-locate once on mount
   useEffect(() => {
-    if (autoLocate && !located.current && !userLocation) {
+    if (autoLocate && !located.current) {
       located.current = true;
       setIsLocating(true);
-      map.locate({ setView: false, maximumAge: 30000 });
+      map.locate({ setView: false, maximumAge: 30000, enableHighAccuracy: true });
     }
-  }, [autoLocate, map, userLocation]);
+  }, [autoLocate, map]);
+
+  // Enable continuous tracking
+  useEffect(() => {
+    if (enableTracking && !watchIdRef.current && navigator.geolocation) {
+      watchIdRef.current = navigator.geolocation.watchPosition(
+        (pos) => {
+          const coords: Coordinates = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+          setPosition(coords);
+          setAccuracy(pos.coords.accuracy);
+          setHeading(pos.coords.heading);
+          setUserLocation(coords);
+          setIsLocating(false);
+        },
+        (err) => {
+          let message = 'Could not track your location';
+          if (err.code === 1) {
+            message = 'Location permission denied. Please allow location access.';
+          }
+          setLocationError(message);
+        },
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
+      );
+    }
+
+    return () => {
+      if (watchIdRef.current !== null) {
+        navigator.geolocation.clearWatch(watchIdRef.current);
+        watchIdRef.current = null;
+      }
+    };
+  }, [enableTracking, setUserLocation, setIsLocating, setLocationError]);
 
   if (!position) return null;
 
   return (
-    <Marker position={[position.lat, position.lng]} icon={createUserLocationIcon()}>
-      <Popup>
-        <div className="text-sm font-semibold text-kigali-green">Your Location</div>
-        <div className="text-xs text-gray-500">{position.lat.toFixed(5)}, {position.lng.toFixed(5)}</div>
-      </Popup>
-    </Marker>
+    <>
+      {/* Accuracy circle */}
+      {accuracy && (
+        <Circle
+          center={[position.lat, position.lng]}
+          radius={accuracy}
+          pathOptions={{ color: '#22c55e', fillColor: '#22c55e', fillOpacity: 0.15, weight: 1 }}
+        />
+      )}
+      <Marker position={[position.lat, position.lng]} icon={createUserLocationIcon()}>
+        <Popup>
+          <div className="text-sm font-semibold text-kigali-green flex items-center gap-1">
+            {isTracking && <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />}
+            Your Location
+          </div>
+          <div className="text-xs text-gray-500">{position.lat.toFixed(5)}, {position.lng.toFixed(5)}</div>
+          {accuracy && <div className="text-xs text-gray-400 mt-1">Accuracy: {Math.round(accuracy)}m</div>}
+          {heading && <div className="text-xs text-gray-400">Heading: {Math.round(heading)}°</div>}
+        </Popup>
+      </Marker>
+    </>
   );
 }
 
@@ -82,7 +148,7 @@ function MapClickHandler({ onLocationSelect }: { onLocationSelect?: (coords: Coo
 
 // ── Sync store zoom/center to Leaflet ─────────────────────────────────────────
 function MapController() {
-  const { center, zoom, setCenter, setZoom, isLocating, setIsLocating } = useMapStore();
+  const { center, zoom, setCenter, setZoom, isLocating, setIsLocating, isTracking, setLocationError } = useMapStore();
   const map = useMap();
 
   useEffect(() => {
@@ -92,7 +158,7 @@ function MapController() {
   // Trigger locate when isLocating flag is set externally
   useEffect(() => {
     if (isLocating) {
-      map.locate({ setView: true, maxZoom: 16 });
+      map.locate({ setView: true, maxZoom: 16, enableHighAccuracy: true });
     }
   }, [isLocating, map]);
 
@@ -104,9 +170,19 @@ function MapController() {
     },
     locationfound: () => {
       setIsLocating(false);
+      setLocationError(null);
     },
-    locationerror: () => {
+    locationerror: (e) => {
       setIsLocating(false);
+      let message = 'Could not get your location';
+      if (e.code === 1) {
+        message = 'Location permission denied. Please enable location access.';
+      } else if (e.code === 2) {
+        message = 'Location unavailable. Check your GPS settings.';
+      } else if (e.code === 3) {
+        message = 'Location request timed out. Try again.';
+      }
+      setLocationError(message);
     },
   });
 
@@ -226,6 +302,8 @@ export function InteractiveMap({
     { category: 'bank',              label: 'Banks',         color: '#059669' },
     { category: 'pharmacy',          label: 'Pharmacies',    color: '#ec4899' },
     { category: 'bus_stop',          label: 'Bus Stops',     color: '#6366f1' },
+    { category: 'district_office',   label: 'Districts',     color: '#64748b' },
+    { category: 'trade_center',      label: 'Trade Centers',color: '#ea580c' },
   ];
 
   return (
@@ -247,14 +325,26 @@ export function InteractiveMap({
 
         {showRouteControls && <MapClickHandler onLocationSelect={onLocationSelect} />}
 
-        {/* Service markers */}
+        {/* Service markers with hover tooltips */}
         {filteredServices.map((service) => (
           <Marker
             key={service.id}
             position={[service.coordinates.lat, service.coordinates.lng]}
             icon={createCategoryIcon(service.category)}
-            eventHandlers={{ click: () => setSelectedLocation(service) }}
+            eventHandlers={{
+              click: () => setSelectedLocation(service),
+              mouseover: (e) => {
+                e.target.openPopup();
+              },
+            }}
           >
+            <Tooltip direction="top" offset={[0, -10]} opacity={1}>
+              <div className="font-semibold text-sm">{service.name}</div>
+              <div className="text-xs text-gray-500 capitalize">{service.category.replace(/_/g, ' ')}</div>
+              {service.rating > 0 && (
+                <div className="text-xs text-yellow-600">{'★'.repeat(Math.round(service.rating))}</div>
+              )}
+            </Tooltip>
             <Popup>
               <div className="min-w-[200px]">
                 <h3 className="font-semibold text-gray-900">{service.name}</h3>
@@ -280,6 +370,9 @@ export function InteractiveMap({
                       {service.rating}/5
                     </span>
                   )}
+                  {service.wheelchair_accessible && (
+                    <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">Accessible</span>
+                  )}
                 </div>
                 {showRouteControls && (
                   <button
@@ -297,14 +390,22 @@ export function InteractiveMap({
           </Marker>
         ))}
 
-        {/* Start / End markers */}
+        {/* Start / End markers with hover tooltips */}
         {start && (
           <Marker position={[start.lat, start.lng]} icon={createStartIcon()}>
+            <Tooltip direction="top" offset={[0, -10]} opacity={1}>
+              <div className="font-semibold text-green-600 text-sm">Start Point</div>
+              <div className="text-xs text-gray-500">{start.lat.toFixed(5)}, {start.lng.toFixed(5)}</div>
+            </Tooltip>
             <Popup><div className="font-semibold text-kigali-green">Start Point</div></Popup>
           </Marker>
         )}
         {end && (
           <Marker position={[end.lat, end.lng]} icon={createEndIcon()}>
+            <Tooltip direction="top" offset={[0, -10]} opacity={1}>
+              <div className="font-semibold text-red-600 text-sm">Destination</div>
+              <div className="text-xs text-gray-500">{end.lat.toFixed(5)}, {end.lng.toFixed(5)}</div>
+            </Tooltip>
             <Popup><div className="font-semibold text-red-500">Destination</div></Popup>
           </Marker>
         )}
