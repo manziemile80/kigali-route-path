@@ -148,11 +148,17 @@ function MapClickHandler({ onLocationSelect }: { onLocationSelect?: (coords: Coo
 
 // ── Sync store zoom/center to Leaflet ─────────────────────────────────────────
 function MapController() {
-  const { center, zoom, setCenter, setZoom, isLocating, setIsLocating, isTracking, setLocationError } = useMapStore();
+  const { center, zoom, setCenter, setZoom, isLocating, setIsLocating, setLocationError } = useMapStore();
   const map = useMap();
+  // Prevent the moveend listener from feeding back into the store while we're
+  // programmatically panning/zooming (avoids the setView → moveend → setCenter infinite loop).
+  const isProgrammaticMove = useRef(false);
 
   useEffect(() => {
-    map.setView([center.lat, center.lng], zoom);
+    isProgrammaticMove.current = true;
+    map.setView([center.lat, center.lng], zoom, { animate: false });
+    // Reset the flag after Leaflet finishes processing the move
+    setTimeout(() => { isProgrammaticMove.current = false; }, 0);
   }, [center, zoom, map]);
 
   // Trigger locate when isLocating flag is set externally
@@ -164,6 +170,7 @@ function MapController() {
 
   useMapEvents({
     moveend: () => {
+      if (isProgrammaticMove.current) return;
       const c = map.getCenter();
       setCenter({ lat: c.lat, lng: c.lng });
       setZoom(map.getZoom());

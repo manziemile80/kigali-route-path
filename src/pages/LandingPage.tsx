@@ -289,7 +289,9 @@ export function LandingPage() {
     { name: 'Banks', count: 4, color: 'bg-emerald-500' },
     { name: 'Pharmacies', count: 4, color: 'bg-pink-500' },
     { name: 'Bus Stops', count: 5, color: 'bg-indigo-500' },
-    { name: 'Government Offices', count: 4, color: 'bg-slate-500' },
+    { name: 'District Offices', count: 3, color: 'bg-slate-500' },
+    { name: 'Trade Centers', count: 5, color: 'bg-orange-600' },
+    { name: 'Water Points', count: 4, color: 'bg-sky-500' },
   ];
 
   return (
@@ -340,7 +342,7 @@ export function LandingPage() {
               {/* Quick stats */}
               <div className="mt-10 grid grid-cols-4 gap-3">
                 {[
-                  { label: 'Services', value: '52+' },
+                  { label: 'Services', value: '60+' },
                   { label: 'Road km', value: '21' },
                   { label: 'sq km', value: '730' },
                   { label: 'Algorithms', value: '2' },
@@ -537,7 +539,7 @@ export function LandingPage() {
               <div className="relative bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-4">
                 <div className="aspect-[4/3] bg-gray-100 dark:bg-gray-700 rounded-lg overflow-hidden">
                   <img
-                    src="https://images.pexels.com/photos/2846230/pexels-photo-2846230.jpeg?auto=compress&cs=tinysrgb&w=800"
+                    src="/image copy.png"
                     alt="Kigali City"
                     className="w-full h-full object-cover"
                   />
