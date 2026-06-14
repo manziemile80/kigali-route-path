@@ -1,11 +1,11 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { InteractiveMap } from '../components/map/InteractiveMap';
 import { fetchServiceLocations, fetchRoadSegments } from '../utils/api';
 import { dijkstra, astar, formatDistance, formatTime } from '../utils/routingAlgorithms';
 import { useRouteStore } from '../stores/routeStore';
 import { useAuthStore } from '../stores/authStore';
 import { useMapStore } from '../stores/mapStore';
-import type { ServiceLocation, RoadSegment, TravelMode, AlgorithmType } from '../types';
+import type { ServiceLocation, RoadSegment, TravelMode, AlgorithmType, Coordinates, ServiceCategory } from '../types';
 import { Card, CardHeader, CardBody, CardFooter } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Select } from '../components/ui/Select';
@@ -13,10 +13,35 @@ import {
   Route, MapPin, Navigation, Timer, ArrowRightLeft,
   GitCompare, Download, Save, Loader2, CheckCircle,
   LocateFixed, AlertTriangle, TrendingDown, Info, Car, Footprints, Bus,
-  Star, Gauge,
+  Star, Gauge, Search, X,
 } from 'lucide-react';
 
 const TRAFFIC_HOURS = { morning: [7, 8, 9], evening: [17, 18, 19] };
+
+const CATEGORY_COLORS: Record<ServiceCategory, string> = {
+  hospital: '#ef4444',
+  health_center: '#f97316',
+  school: '#8b5cf6',
+  police_station: '#3b82f6',
+  fire_station: '#dc2626',
+  bank: '#059669',
+  pharmacy: '#ec4899',
+  bus_stop: '#6366f1',
+  district_office: '#64748b',
+  trade_center: '#ea580c',
+  water_point: '#0ea5e9',
+  public_utility: '#14b8a6',
+};
+
+function getCategoryColor(category: ServiceCategory): string {
+  return CATEGORY_COLORS[category] || '#6b7280';
+}
+
+function getTrafficLabel(score: number): { label: string; colorClass: string } {
+  if (score < 20) return { label: 'Light traffic', colorClass: 'text-green-600' };
+  if (score < 50) return { label: 'Moderate traffic', colorClass: 'text-yellow-600' };
+  return { label: 'Heavy traffic', colorClass: 'text-red-600' };
+}
 
 function getTrafficLevel() {
   const hour = new Date().getHours();
@@ -41,6 +66,10 @@ export function RoutePlanningPage() {
     astar:    Awaited<ReturnType<typeof astar>>;
   } | null>(null);
   const [saved, setSaved] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<ServiceLocation[]>([]);
+  const [showSearchResults, setShowSearchResults] = useState(false);
+  const searchRef = useRef<HTMLDivElement>(null);
   const traffic = getTrafficLevel();
 
   const {
@@ -61,6 +90,55 @@ export function RoutePlanningPage() {
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
+
+  // Search functionality
+  useEffect(() => {
+    if (searchQuery.trim().length < 2) {
+      setSearchResults([]);
+      setShowSearchResults(false);
+      return;
+    }
+
+    const query = searchQuery.toLowerCase();
+    const results = services.filter((s) =>
+      s.name.toLowerCase().includes(query) ||
+      (s.address && s.address.toLowerCase().includes(query)) ||
+      s.category.toLowerCase().includes(query)
+    ).slice(0, 8);
+
+    setSearchResults(results);
+    setShowSearchResults(true);
+  }, [searchQuery, services]);
+
+  // Close search results when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
+        setShowSearchResults(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const handleSelectDestination = useCallback((service: ServiceLocation) => {
+    setEnd(service.coordinates);
+    setSearchQuery('');
+    setShowSearchResults(false);
+    useMapStore.getState().zoomToLocation(service.coordinates, 15);
+  }, [setEnd]);
+
+  const handleManualCoordinateInput = useCallback((input: string) => {
+    const match = input.match(/(-?\d+\.?\d*)\s*[,\s]\s*(-?\d+\.?\d*)/);
+    if (match) {
+      const lat = parseFloat(match[1]);
+      const lng = parseFloat(match[2]);
+      if (lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+        setEnd({ lat, lng });
+        useMapStore.getState().zoomToLocation({ lat, lng }, 15);
+      }
+    }
+  }, [setEnd]);
 
   const handleUseMyLocation = useCallback(() => {
     if (!navigator.geolocation) { setLocationError('Geolocation not supported.'); return; }
@@ -274,7 +352,73 @@ export function RoutePlanningPage() {
           {/* Destination */}
           <Card>
             <CardHeader title="Destination" />
-            <CardBody>
+            <CardBody className="space-y-3">
+              {/* Search box */}
+              <div className="relative" ref={searchRef}>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    onFocus={() => searchQuery.length >= 2 && setShowSearchResults(true)}
+                    placeholder="Search destination by name or address..."
+                    className="w-full pl-9 pr-9 py-2.5 text-sm bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-kigali-green focus:border-transparent"
+                  />
+                  {searchQuery && (
+                    <button
+                      onClick={() => { setSearchQuery(''); setShowSearchResults(false); }}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Search results dropdown */}
+                {showSearchResults && searchResults.length > 0 && (
+                  <div className="absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg max-h-64 overflow-y-auto">
+                    {searchResults.map((service) => (
+                      <button
+                        key={service.id}
+                        onClick={() => handleSelectDestination(service)}
+                        className="w-full text-left px-3 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-700 border-b border-gray-100 dark:border-gray-700 last:border-b-0"
+                      >
+                        <div className="flex items-start gap-2">
+                          <div
+                            className="w-2 h-2 rounded-full mt-1.5 flex-shrink-0"
+                            style={{ backgroundColor: getCategoryColor(service.category) }}
+                          />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{service.name}</p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400 capitalize">{service.category.replace(/_/g, ' ')}</p>
+                            {service.address && <p className="text-xs text-gray-400 truncate">{service.address}</p>}
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {showSearchResults && searchQuery.length >= 2 && searchResults.length === 0 && (
+                  <div className="absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg p-3">
+                    <p className="text-sm text-gray-500">No results found. Try a different search or click on the map.</p>
+                    <button
+                      onClick={() => handleManualCoordinateInput(searchQuery)}
+                      className="mt-2 text-xs text-kigali-green hover:underline"
+                    >
+                      Use "{searchQuery}" as coordinates
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center space-x-2 text-xs text-gray-400">
+                <div className="flex-1 border-t border-dashed border-gray-300 dark:border-gray-600" />
+                <span>or click on map</span>
+                <div className="flex-1 border-t border-dashed border-gray-300 dark:border-gray-600" />
+              </div>
+
               <div className="flex items-center space-x-3">
                 <div className="w-8 h-8 rounded-full bg-red-500/10 flex items-center justify-center flex-shrink-0">
                   <Navigation className="w-4 h-4 text-red-500" />
@@ -288,16 +432,11 @@ export function RoutePlanningPage() {
                       <p className="text-xs text-red-500">Destination set</p>
                     </div>
                   ) : (
-                    <p className="text-sm text-gray-400">Click on map or a service marker</p>
+                    <p className="text-sm text-gray-400">Search or click on map</p>
                   )}
                 </div>
                 {end && <button onClick={() => setEnd(null)} className="text-xs text-red-400 hover:text-red-600">Clear</button>}
               </div>
-              {!end && (
-                <p className="mt-2 text-xs text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-900 rounded-lg p-2">
-                  Tap any service icon on the map and press "Set as Destination"
-                </p>
-              )}
             </CardBody>
           </Card>
 
@@ -381,78 +520,159 @@ export function RoutePlanningPage() {
             )}
           </div>
 
-          {/* ── Route Alternatives ─────────────────────────── */}
+          {/* ── Route Alternatives with Legend ─────────────────────────── */}
           {routes.length > 0 && (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
-                  Route Alternatives
-                </h3>
-                <span className="text-xs text-gray-400">{routes.length} options found</span>
-              </div>
-
-              {routes.map((r, i) => (
-                <button
-                  key={i}
-                  onClick={() => selectRoute(i)}
-                  className={`w-full text-left p-3 rounded-xl border-2 transition-all ${
-                    i === selectedRouteIdx
-                      ? 'shadow-md scale-[1.01]'
-                      : 'opacity-70 hover:opacity-90 border-gray-200 dark:border-gray-700'
-                  }`}
-                  style={
-                    i === selectedRouteIdx
-                      ? { borderColor: r.color, backgroundColor: r.color + '0d' }
-                      : {}
-                  }
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-center gap-2 min-w-0">
+            <div className="space-y-3">
+              {/* Route Legend */}
+              <div className="bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-900 rounded-xl p-3 border border-gray-200 dark:border-gray-700">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                    <Route className="w-4 h-4" />
+                    Route Legend
+                  </h3>
+                  <span className="text-xs text-gray-400">{routes.length} options</span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {routes.map((r, i) => (
+                    <div
+                      key={i}
+                      onClick={() => selectRoute(i)}
+                      className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-medium cursor-pointer transition-all border-2 ${
+                        i === selectedRouteIdx
+                          ? 'shadow-md scale-105'
+                          : 'opacity-60 hover:opacity-100'
+                      }`}
+                      style={{
+                        backgroundColor: r.color + '20',
+                        borderColor: i === selectedRouteIdx ? r.color : r.color + '40',
+                        color: r.color,
+                      }}
+                    >
                       <span
-                        className="w-3 h-3 rounded-full flex-shrink-0"
+                        className="w-2.5 h-2.5 rounded-full"
                         style={{ backgroundColor: r.color }}
                       />
-                      <span className="text-sm font-semibold text-gray-900 dark:text-white truncate">
-                        {r.label}
-                      </span>
-                      {r.isRecommended && (
-                        <span className="flex items-center gap-0.5 text-[10px] font-bold text-green-700 bg-green-100 px-1.5 py-0.5 rounded-full flex-shrink-0">
-                          <Star className="w-2.5 h-2.5" />
-                          Best
-                        </span>
+                      <span>{r.label}</span>
+                      {r.isRecommended && <Star className="w-3 h-3 fill-current" />}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Route Cards */}
+              <div className="space-y-2">
+                {routes.map((r, i) => (
+                  <button
+                    key={i}
+                    onClick={() => selectRoute(i)}
+                    className={`w-full text-left p-4 rounded-xl border-2 transition-all ${
+                      i === selectedRouteIdx
+                        ? 'shadow-lg scale-[1.01] border-2'
+                        : 'opacity-70 hover:opacity-100 border-gray-200 dark:border-gray-700'
+                    }`}
+                    style={
+                      i === selectedRouteIdx
+                        ? { borderColor: r.color, backgroundColor: r.color + '08' }
+                        : {}
+                    }
+                  >
+                    {/* Header with route color indicator */}
+                    <div className="flex items-start justify-between gap-2 mb-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div
+                          className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-lg flex-shrink-0 shadow-md"
+                          style={{ backgroundColor: r.color }}
+                        >
+                          {i + 1}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-bold text-gray-900 dark:text-white truncate">
+                              {r.label}
+                            </span>
+                            {r.isRecommended && (
+                              <span className="flex items-center gap-0.5 text-[10px] font-bold text-white bg-green-600 px-2 py-0.5 rounded-full flex-shrink-0">
+                                <Star className="w-2.5 h-2.5" />
+                                Recommended
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs capitalize mt-0.5">
+                            {r.trafficScore !== undefined && (
+                              <span className={getTrafficLabel(r.trafficScore).colorClass}>
+                                {getTrafficLabel(r.trafficScore).label}
+                              </span>
+                            )}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Traffic indicator */}
+                      {r.trafficScore !== undefined && (
+                        <div className="flex flex-col items-end flex-shrink-0">
+                          <div className="flex items-center gap-1">
+                            <Gauge className="w-4 h-4 text-gray-400" />
+                            <span
+                              className={`text-sm font-bold ${
+                                r.trafficScore < 20 ? 'text-green-600' : r.trafficScore < 50 ? 'text-yellow-600' : 'text-red-600'
+                              }`}
+                            >
+                              {r.trafficScore < 20 ? 'Low' : r.trafficScore < 50 ? 'Medium' : 'High'}
+                            </span>
+                          </div>
+                          <span className="text-[10px] text-gray-400">Traffic: {r.trafficScore}/100</span>
+                        </div>
                       )}
                     </div>
-                    {r.trafficScore !== undefined && (
-                      <div className="flex items-center gap-1 flex-shrink-0">
-                        <Gauge className="w-3 h-3 text-gray-400" />
-                        <span
-                          className={`text-xs font-semibold ${
-                            r.trafficScore < 20 ? 'text-green-600' : r.trafficScore < 50 ? 'text-yellow-600' : 'text-red-600'
-                          }`}
-                        >
-                          {r.trafficScore < 20 ? 'Low traffic' : r.trafficScore < 50 ? 'Moderate' : 'High traffic'}
-                        </span>
+
+                    {/* Metrics grid */}
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="text-center bg-white dark:bg-gray-900 rounded-lg py-2 px-1 shadow-sm">
+                        <div className="flex items-center justify-center gap-1 text-gray-400 mb-0.5">
+                          <Route className="w-3 h-3" />
+                          <span className="text-[10px]">Distance</span>
+                        </div>
+                        <p className="text-sm font-bold text-gray-900 dark:text-white">{formatDistance(r.distance_m)}</p>
+                      </div>
+                      <div className="text-center bg-white dark:bg-gray-900 rounded-lg py-2 px-1 shadow-sm">
+                        <div className="flex items-center justify-center gap-1 text-gray-400 mb-0.5">
+                          <Timer className="w-3 h-3" />
+                          <span className="text-[10px]">Time</span>
+                        </div>
+                        <p className="text-sm font-bold text-gray-900 dark:text-white">{formatTime(r.time_min)}</p>
+                      </div>
+                      <div className="text-center bg-white dark:bg-gray-900 rounded-lg py-2 px-1 shadow-sm">
+                        <div className="flex items-center justify-center gap-1 text-gray-400 mb-0.5">
+                          <Gauge className="w-3 h-3" />
+                          <span className="text-[10px]">Traffic</span>
+                        </div>
+                        <div className="flex items-center justify-center">
+                          <div className="w-16 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all ${
+                                r.trafficScore && r.trafficScore < 20
+                                  ? 'bg-green-500'
+                                  : r.trafficScore && r.trafficScore < 50
+                                    ? 'bg-yellow-500'
+                                    : 'bg-red-500'
+                              }`}
+                              style={{ width: `${r.trafficScore || 50}%` }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Traffic avoidance indicator */}
+                    {avoidTraffic && traffic.level !== 'low' && i === 0 && (
+                      <div className="mt-2 flex items-center gap-1.5 text-xs text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/20 rounded-lg px-2 py-1">
+                        <TrendingDown className="w-3.5 h-3.5" />
+                        <span>Avoids current {traffic.level} traffic congestion</span>
                       </div>
                     )}
-                  </div>
-                  <div className="mt-2 grid grid-cols-2 gap-2">
-                    <div className="text-center bg-white dark:bg-gray-900 rounded-lg py-1.5">
-                      <p className="text-sm font-bold text-gray-900 dark:text-white">{formatDistance(r.distance_m)}</p>
-                      <p className="text-[10px] text-gray-400">Distance</p>
-                    </div>
-                    <div className="text-center bg-white dark:bg-gray-900 rounded-lg py-1.5">
-                      <p className="text-sm font-bold text-gray-900 dark:text-white">{formatTime(r.time_min)}</p>
-                      <p className="text-[10px] text-gray-400">Est. Time</p>
-                    </div>
-                  </div>
-                  {avoidTraffic && traffic.level !== 'low' && i === 0 && (
-                    <div className="mt-2 flex items-center gap-1.5 text-[10px] text-green-700 dark:text-green-400">
-                      <TrendingDown className="w-3 h-3" />
-                      Avoids {traffic.level} congestion
-                    </div>
-                  )}
-                </button>
-              ))}
+                  </button>
+                ))}
+              </div>
 
               <CardFooter className="pt-0 px-0">
                 <div className="flex flex-col space-y-2 w-full">
