@@ -535,7 +535,6 @@ export function LandingPage() {
             </div>
 
             <div className="mt-12 lg:mt-0 relative">
-              <div className="aspect-square bg-gradient-to-br from-kigali-green to-kigali-blue rounded-3xl opacity-10 absolute inset-0 transform rotate-6" />
               <div className="relative bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-4">
                 <div className="aspect-[4/3] bg-gray-100 dark:bg-gray-700 rounded-lg overflow-hidden">
                   <img
